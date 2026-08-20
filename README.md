@@ -399,6 +399,23 @@ The checked code differs from the broader implementation plan in these places:
 - **No authentication ships on the documentation routes.** The only gate is `api-dock.enabled`, and the default middleware stack is `['web']`. The generated document exposes your internal API surface, so put the routes behind your own auth middleware — the `middleware` config key in [Configuration reference](#configuration-reference) — before deploying anywhere public.
 - A non-text upstream response is not proxied back verbatim. The guard replaces a body that is not valid UTF-8 with a short placeholder and sets `binary: true` on the proxy response, because the panel's JSON transport cannot carry raw bytes.
 
+## Releasing (maintainers)
+
+Versions live in git tags only — `composer.json` carries no `version` key, and Packagist reads the tag list. Commit everything the release should contain first, then run:
+
+```bash
+./release.sh              # interactive version menu (patch / minor / major / custom)
+./release.sh patch        # or name the bump directly
+./release.sh 0.4.2        # or the exact version
+./release.sh --dry-run    # show what would happen, write nothing
+```
+
+The script refuses to run on a dirty working tree or a branch behind `origin/main`. Before tagging it runs Pint, the Pest suite, Vitest and the Vite build, then fails if `resources/dist` changed — the compiled panel assets are committed, so a stale `dist` has to be committed before the release rather than tagged around. PHPStan is deliberately outside the gate.
+
+Tagging and pushing are confirmed separately; `--no-push` stops after the local tag and `--no-verify` skips the quality gate. When `gh` is installed the script offers to open a GitHub release with generated notes.
+
+The first publish also needs a one-time submit at [packagist.org/packages/submit](https://packagist.org/packages/submit) with the repository URL, plus the GitHub webhook so later tags sync automatically.
+
 ## Attribution and license
 
 API Dock is built on [`dedoc/scramble`](https://github.com/dedoc/scramble), which is distributed under the MIT License. API Dock is also distributed under the MIT License; see [LICENSE](LICENSE).

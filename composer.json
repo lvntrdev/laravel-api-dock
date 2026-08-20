@@ -1,8 +1,28 @@
 {
     "name": "lvntr/api-dock",
     "description": "Laravel API documentation and AI export tooling built on dedoc/scramble (MIT).",
-    "type": "library",
+    "keywords": [
+        "laravel",
+        "api",
+        "documentation",
+        "openapi",
+        "scramble",
+        "ai",
+        "llms-txt"
+    ],
+    "homepage": "https://github.com/lvntr-berth/berth-api-dock",
     "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Levent Acar",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/lvntr-berth/berth-api-dock/issues",
+        "source": "https://github.com/lvntr-berth/berth-api-dock"
+    },
     "require": {
         "php": "^8.3",
         "dedoc/scramble": "^0.13",
@@ -25,6 +45,11 @@
         "psr-4": {
             "LvntR\\ApiDock\\Tests\\": "tests/"
         }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest --testsuite=\"Api Dock\"",
+        "lint": "vendor/bin/pint",
+        "analyse": "vendor/bin/phpstan analyse"
     },
     "extra": {
         "laravel": {

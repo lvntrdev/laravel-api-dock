@@ -1,0 +1,24 @@
+* text=auto eol=lf
+
+# Composer dist arşivinden çıkarılanlar (Packagist zip'i yalın kalsın).
+/.claude            export-ignore
+/.github            export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/package.json       export-ignore
+/package-lock.json  export-ignore
+/phpstan.neon       export-ignore
+/phpunit.xml        export-ignore
+/pint.json          export-ignore
+/plan-docs          export-ignore
+/release.sh         export-ignore
+/resources/js       export-ignore
+/tests              export-ignore
+/tsconfig.json      export-ignore
+/vite.config.ts     export-ignore
+
+# Derlenmiş varlıklar — diff'te binary sayılsın.
+resources/dist/*.woff   binary
+resources/dist/*.woff2  binary
+resources/dist/*.ttf    binary
+resources/dist/*.eot    binary
