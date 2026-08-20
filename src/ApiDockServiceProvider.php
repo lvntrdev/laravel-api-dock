@@ -31,6 +31,18 @@ final class ApiDockServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
+        // The compiled panel lives in `public/vendor/api-dock`, which Composer never touches:
+        // without a republish an upgraded package keeps serving the previous bundle. Laravel's
+        // own `post-autoload-dump` script republishes everything tagged `laravel-assets` with
+        // `--force`, so registering the directory under that tag as well makes `composer update`
+        // refresh it on its own. Spatie's `hasAssets()` registers the same directory under
+        // `api-dock-assets`, which stays available for a deliberate manual publish.
+        if ($this->app->runningInConsole()) {
+            $this->publishes([
+                $this->package->basePath('/../resources/dist') => public_path('vendor/api-dock'),
+            ], 'laravel-assets');
+        }
+
         // Appended to the host application's OWN Scramble API rather than a private
         // one. `Scramble::registerApi()` CLONES the default config at the moment it
         // is called (GeneratorConfigCollection::register), so a package that

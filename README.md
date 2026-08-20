@@ -47,10 +47,10 @@ The package is not published on Packagist. Point Composer at the repository, the
 ```
 
 ```bash
-composer require lvntr/api-dock:^0.1
+composer require lvntr/api-dock:~0.0.1
 ```
 
-Composer reads the tags of that repository, so a constraint resolves to a released tag exactly as it would through Packagist. The Composer package name stays `lvntr/api-dock` even though the repository is named `laravel-api-dock`.
+Composer reads the tags of that repository, so a constraint resolves to a released tag exactly as it would through Packagist. The Composer package name stays `lvntr/api-dock` even though the repository is named `laravel-api-dock`. A caret constraint on a `0.0.x` version is exact in Composer — `^0.0.1` allows only `0.0.1` — so this uses `~0.0.1` instead, which accepts every later `0.0.x` release, matching what a plain `composer update` needs while the package is pre-0.1.
 
 Laravel discovers `LvntR\ApiDock\ApiDockServiceProvider` through the package manifest. Publish only what the application needs:
 
@@ -81,13 +81,21 @@ All paths change with `route_prefix`. Every route receives the configured `middl
 
 ```bash
 composer update lvntr/api-dock
+```
+
+That single command is enough. The compiled panel in `public/vendor/api-dock` is republished automatically:
+the package registers that directory under Laravel's `laravel-assets` tag, and Laravel's own
+`post-autoload-dump` script runs `vendor:publish --tag=laravel-assets --force` after every Composer command.
+Nothing to remember.
+
+If an application removed that script from its `composer.json`, republish by hand instead:
+
+```bash
 php artisan vendor:publish --tag=api-dock-assets --force
 ```
 
-**Republishing the assets is not optional.** The documentation page loads the compiled panel from
-`public/vendor/api-dock`, which Composer never touches; without the second command an upgraded package keeps
-serving the previous bundle. The asset URL is fingerprinted with the file's own modification time, so a
-republished file reaches the browser immediately — no cache busting of your own is needed.
+The asset URL is fingerprinted with the file's own modification time, so a republished file reaches the
+browser immediately — no cache busting of your own is needed.
 
 Composer caches the repository's tag list per project. When a freshly released version stays invisible, run
 `composer clear-cache` and update again.
