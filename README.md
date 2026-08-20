@@ -1,8 +1,28 @@
 # API Dock
 
-API Dock is a Laravel package built on [`dedoc/scramble`](https://github.com/dedoc/scramble). Scramble remains responsible for deriving the OpenAPI document from application code. API Dock does not replace Scramble; it adds PHP attributes for AI and integration metadata, MCP and `llms.txt` exports, stored OpenAPI snapshots and diffs, a backend proxy for try-it requests, and a Vue 3 documentation application.
+API Dock turns a Laravel API into documentation that both people and models can read. It builds on
+[`dedoc/scramble`](https://github.com/dedoc/scramble) and does not replace it: Scramble keeps deriving the
+OpenAPI document from your application code, while API Dock adds the reading surface on top of it.
 
-The current source tree includes the documentation browser, while its AI and try-it Vue components are placeholders. MCP and `llms.txt` are currently file exports from Artisan, not HTTP endpoints. See [Current implementation differences](#current-implementation-differences).
+Install it, visit `/api-dock`, and the API you already have is browsable.
+
+## What you get
+
+- **A documentation browser** — a Vue 3 single-page app served from your own application: endpoint sidebar
+  grouped by tag with search, parameter and request-body detail, expandable response and schema trees,
+  a light and a dark theme, and an English and Turkish interface.
+- **Try it, through your server** — the reader sends the request they are looking at, and the package proxies
+  it: host allowlist, DNS-rebinding-safe address pinning, response size cap. Credentials stay server-side,
+  encrypted and scoped to the session; the browser only ever holds a masked hint. Disabled until you enable it.
+- **An AI prompt tab** — one copy button hands a model the whole operation as context, plus the MCP tool
+  definition and the `llms.txt` section for that endpoint on their own.
+- **A spec diff tab** — paste the output of `php artisan api-dock:diff --json` and read what changed between
+  two versions of the contract, marked breaking, additive or cosmetic.
+- **Six PHP attributes** — hints, pitfalls, examples, changelog entries, MCP tool control and feature facts
+  (auth, scopes, rate limit, deprecation, stability), authored next to the controller and emitted into the
+  OpenAPI document as vendor extensions.
+- **Artisan exports** — `llms.txt` and `mcp-tools.json` for agent tooling, plus OpenAPI snapshots and diffs
+  you can run in CI.
 
 ## Requirements
 
@@ -11,7 +31,7 @@ The current source tree includes the documentation browser, while its AI and try
 - `dedoc/scramble` `^0.13`
 - The cURL PHP extension when the try-it proxy is enabled; the proxy fails closed without it because it cannot pin a checked DNS address otherwise
 
-## Installation and publishing
+## Installation
 
 The package is not published on Packagist. Point Composer at the repository, then require the package by name:
 
@@ -57,28 +77,46 @@ With the default `route_prefix`, the package registers these routes:
 
 All paths change with `route_prefix`. Every route receives the configured `middleware` followed by API Dock's own enabled check. The try-it and profile routes also receive the configured throttle.
 
-### Testing a local checkout
+## Updating
 
-During package development, add a Composer `path` repository to the consuming application's `composer.json`. Point `url` at this package directory and require the development package with `"lvntr/api-dock": "*"`:
-
-```json
-{
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../api-dock",
-            "options": {
-                "symlink": true
-            }
-        }
-    ],
-    "require": {
-        "lvntr/api-dock": "*"
-    }
-}
+```bash
+composer update lvntr/api-dock
+php artisan vendor:publish --tag=api-dock-assets --force
 ```
 
-Run `composer update lvntr/api-dock` in that local application after editing its Composer file. A symlink makes subsequent package changes visible without copying the package.
+**Republishing the assets is not optional.** The documentation page loads the compiled panel from
+`public/vendor/api-dock`, which Composer never touches; without the second command an upgraded package keeps
+serving the previous bundle. The asset URL is fingerprinted with the file's own modification time, so a
+republished file reaches the browser immediately — no cache busting of your own is needed.
+
+Composer caches the repository's tag list per project. When a freshly released version stays invisible, run
+`composer clear-cache` and update again.
+
+If you published the config file, `composer update` does not touch it. New **top-level** keys fall back to the
+package defaults automatically, but a key added inside an existing group — anything under `try_it`, for
+example — does not, because the merge is one level deep. After a release that adds configuration, compare your
+`config/api-dock.php` with `vendor/lvntr/api-dock/config/api-dock.php` and copy over what is missing. The same
+applies to a view you overrode under `resources/views/vendor/api-dock`: it keeps its old markup, including the
+asset tags, until you reconcile it yourself.
+
+Until version 1.0 a minor bump may change behaviour. Read the release notes for the tag you are moving to
+before rolling it out.
+
+## Before you deploy
+
+- **No authentication ships on the documentation routes.** The only gate is `api-dock.enabled`, and the default
+  middleware stack is `['web']`. The generated document exposes your internal API surface, so put the routes
+  behind your own auth middleware — the `middleware` config key in
+  [Configuration reference](#configuration-reference) — before deploying anywhere public.
+- **The try-it proxy is off by default.** Turn it on deliberately, keep `try_it.allowed_hosts` and
+  `try_it.allowed_methods` as narrow as the job needs, and read [Try-it security contract](#try-it-security-contract) first.
+- Session credentials are stored in the configured cache, encrypted with the application encrypter and scoped
+  to the session, and expire after `try_it.ttl` of inactivity. They are not kept in the browser.
+- MCP, `llms.txt` and diff artifacts are produced by Artisan, not by HTTP endpoints — nothing extra is exposed
+  on the route table.
+- A non-text upstream response is not proxied back verbatim. A body that is not valid UTF-8 is replaced with a
+  short placeholder and the proxy response carries `binary: true`, because the panel's JSON transport cannot
+  carry raw bytes.
 
 ## Configuration reference
 
@@ -381,7 +419,6 @@ OpenAPI `servers[].variables` are intended to reach the panel as one control per
 
 The server rejects a variable value containing any of `/`, `\`, `@`, `:`, `?`, `#`, `[`, `]`, whitespace, or ASCII control characters. It repeats percent-decoding before checking, so encoded separators such as `%2F` and nested forms such as `%252F` are also rejected. Values encoded too deeply to validate within five passes are rejected. It also rejects a value outside a non-empty declared `enum`, a variable with neither a supplied non-empty value nor a `default`, and a template that still contains an unsubstituted `{placeholder}`. Accepted values are inserted with `rawurlencode`; the final URL still passes the full scheme, host, allowlist, DNS, and address-range checks.
 
-The current Vue `TryItPanel` is a placeholder, so these controls are not yet rendered by the bundled SPA. The backend contract is implemented at `POST /api-dock/try-it`.
 
 ## AI integration
 
@@ -403,34 +440,10 @@ Tool names use the first available value: `AiTool::$name`, OpenAPI `operationId`
 
 The exporters consume the generated OpenAPI document; they do not inspect controller attributes directly. This keeps OpenAPI as the shared contract among the documentation UI, snapshots, MCP tools, and `llms.txt`.
 
-## Current implementation differences
-
-The checked code differs from the broader implementation plan in these places:
-
-- The route table contains no MCP, `llms.txt`, or diff export endpoints. Those artifacts are available through Artisan only.
-- The plan described cached credentials as “never persisted”; the implementation stores them in the configured cache, encrypted and session-scoped, with a TTL.
-- **No authentication ships on the documentation routes.** The only gate is `api-dock.enabled`, and the default middleware stack is `['web']`. The generated document exposes your internal API surface, so put the routes behind your own auth middleware — the `middleware` config key in [Configuration reference](#configuration-reference) — before deploying anywhere public.
-- A non-text upstream response is not proxied back verbatim. The guard replaces a body that is not valid UTF-8 with a short placeholder and sets `binary: true` on the proxy response, because the panel's JSON transport cannot carry raw bytes.
-
-## Releasing (maintainers)
-
-Versions live in git tags only — `composer.json` carries no `version` key, and Composer reads the tag list straight off the repository. Commit everything the release should contain first, then run:
-
-```bash
-./release.sh              # interactive version menu (patch / minor / major / custom)
-./release.sh patch        # or name the bump directly
-./release.sh 0.4.2        # or the exact version
-./release.sh --dry-run    # show what would happen, write nothing
-```
-
-The script refuses to run on a dirty working tree or a branch behind `origin/main`. Before tagging it runs Pint, the Pest suite, Vitest and the Vite build, then fails if `resources/dist` changed — the compiled panel assets are committed, so a stale `dist` has to be committed before the release rather than tagged around. PHPStan is deliberately outside the gate.
-
-Tagging and pushing are confirmed separately; `--no-push` stops after the local tag and `--no-verify` skips the quality gate. When `gh` is installed the script offers to open a GitHub release with generated notes.
-
-Nothing is submitted anywhere after the push: a consuming application picks the new tag up with `composer update lvntr/api-dock` through its VCS repository entry. Composer caches the tag list per project, so `composer clear-cache` is the fallback when a fresh tag stays invisible.
-
 ## Attribution and license
 
 API Dock is built on [`dedoc/scramble`](https://github.com/dedoc/scramble), which is distributed under the MIT License. API Dock is also distributed under the MIT License; see [LICENSE](LICENSE).
 
 Scramble Pro is not a dependency.
+
+API Dock is written and maintained by Levent Acar — [lvntr.dev](https://lvntr.dev).
