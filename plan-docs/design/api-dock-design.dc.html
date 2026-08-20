@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="./colors_and_type.css">
+<link rel="stylesheet" href="./assets/primeicons.css">
+<style>
+  html { font-size: 0.875rem; }
+  body { margin: 0; font-family: var(--font-sans, 'Instrument Sans', system-ui, sans-serif); background: var(--content-bg); color: var(--text-color); -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; }
+  a { color: var(--primary-600); text-decoration: none; }
+  a:hover { color: var(--primary-700); text-decoration: underline; }
+  ::selection { background: var(--primary-100); }
+</style>
+</helmet>
+
+<div style="display: flex; min-height: 100vh; align-items: stretch; font-size: 14px; line-height: 1.5715;">
+
+  <aside style="flex: 0 0 300px; width: 300px; background: var(--sidebar-bg); color: var(--sidebar-text); display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow: hidden;">
+      <div style="display: flex; flex-direction: column; height: 100%;">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 18px 20px 16px; border-bottom: 1px solid var(--sidebar-border);">
+          <div style="width: 32px; height: 32px; border-radius: var(--radius-lg); background: var(--primary-500); color: #fff; display: flex; align-items: center; justify-content: center; flex: 0 0 32px;"><i class="pi pi-box" style="font-size: 15px;"></i></div>
+          <div style="display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;">
+            <div style="font-size: 15px; font-weight: 700; color: #fff; letter-spacing: -0.01em;">API Dock</div>
+            <div style="font-size: 10px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--sidebar-text-muted);">Spec Explorer</div>
+          </div>
+        </div>
+        <div style="padding: 14px 16px 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; border-radius: var(--radius-sm); background: var(--surface-800); border: 1px solid var(--surface-700);">
+            <i class="pi pi-search" style="font-size: 12px; color: var(--sidebar-text-muted);"></i>
+            <input value="{{ query }}" onChange="{{ onQuery }}" placeholder="Search path, tag, operation…" style="flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: #fff; font: inherit; font-size: 13px;">
+            <span style="font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--sidebar-text-muted); border: 1px solid var(--surface-700); border-radius: var(--radius-xs); padding: 1px 5px;">/</span>
+          </div>
+        </div>
+        <nav style="flex: 1; overflow-y: auto; padding: 6px 12px 16px;">
+          <sc-for list="{{ groups }}" as="group" hint-placeholder-count="4">
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;">
+              <button onClick="{{ group.toggle }}" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: transparent; cursor: pointer; font: inherit; transition: background var(--transition-fast);" style-hover="background: var(--sidebar-hover-bg);">
+                <i class="{{ group.chevron }}" style="font-size: 9px; color: var(--surface-500);"></i>
+                <span style="flex: 1; text-align: left; font-size: 10px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase; color: var(--sidebar-text-muted);">{{ group.name }}</span>
+                <span style="font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--surface-500);">{{ group.count }}</span>
+              </button>
+              <sc-for list="{{ group.items }}" as="item" hint-placeholder-count="3">
+                <div>
+                  <sc-if value="{{ item.isActive }}" hint-placeholder-val="{{ false }}">
+                    <button onClick="{{ item.select }}" style="width: 100%; text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid var(--surface-700); border-left: 2px solid var(--primary-500); border-radius: var(--radius-sm); background: var(--surface-800); cursor: pointer; font: inherit;">
+                      <span style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                        <span style="flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 6px; border-radius: var(--radius-xs); font-family: var(--font-mono, ui-monospace, monospace); background: {{ item.badgeBg }}; color: {{ item.badgeFg }};">{{ item.method }}</span>
+                        <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; color: #fff;">{{ item.title }}</span>
+                      </span>
+                      <span style="font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--primary-300); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ item.path }}</span>
+                    </button>
+                  </sc-if>
+                  <sc-if value="{{ item.isIdle }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ item.select }}" style="width: 100%; text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid transparent; border-left: 2px solid transparent; border-radius: var(--radius-sm); background: transparent; cursor: pointer; font: inherit; transition: background var(--transition-fast);" style-hover="background: var(--sidebar-hover-bg);">
+                      <span style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                        <span style="flex: 0 0 auto; font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; padding: 3px 6px; border-radius: var(--radius-xs); font-family: var(--font-mono, ui-monospace, monospace); background: {{ item.badgeBg }}; color: {{ item.badgeFg }};">{{ item.method }}</span>
+                        <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; color: var(--sidebar-text);">{{ item.title }}</span>
+                      </span>
+                      <span style="font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--surface-500); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ item.path }}</span>
+                    </button>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </nav>
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-top: 1px solid var(--sidebar-border); font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--sidebar-text-muted);">
+          <span style="display: flex; align-items: center; gap: 7px;"><span style="width: 6px; height: 6px; border-radius: var(--radius-full); background: var(--green-500);"></span>OpenAPI 3.1.0</span>
+          <span>0.0.1</span>
+        </div>
+      </div>
+  </aside>
+
+  <main style="flex: 1; min-width: 0; display: flex; justify-content: center; padding: 32px 40px 96px;">
+    <div style="width: 100%; max-width: 900px; display: flex; flex-direction: column; gap: 26px;">
+
+      <section style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase; color: var(--primary-500);">Operation</span>
+          <h1 style="margin: 0; font-size: 30px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; color: var(--heading-color); max-width: 680px; text-wrap: pretty;">{{ title }}</h1>
+        </div>
+
+        <div style="display: inline-flex; align-items: flex-start; gap: 12px; align-self: flex-start; max-width: 100%; padding: 9px 16px 9px 10px; border-radius: var(--radius-lg); background: var(--surface-50); border: 1px solid var(--border-color);">
+          <span style="flex: 0 0 auto; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; font-family: var(--font-mono, ui-monospace, monospace); padding: 5px 11px; border-radius: var(--radius-sm); background: {{ badgeBg }}; color: {{ badgeFg }};">{{ method }}</span>
+          <span style="min-width: 0; padding-top: 3px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 13.5px; line-height: 1.5; color: var(--text-muted); white-space: normal; overflow-wrap: anywhere;">https://{kurum}.congress-app.test/api<b style="font-weight: 700; color: var(--surface-900);">{{ path }}</b></span>
+        </div>
+
+        <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); overflow: hidden;">
+          <p style="margin: 0; padding: 20px 22px; font-size: 14px; line-height: 1.75; color: var(--text-color); text-wrap: pretty;">{{ description }}</p>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--border-color);">
+            <div style="display: flex; flex-direction: column; gap: 4px; padding: 14px 22px; border-right: 1px solid var(--border-color);">
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Auth</span>
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; font-weight: 600; color: var(--surface-800);">X-Api-Key</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; padding: 14px 22px; border-right: 1px solid var(--border-color);">
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Rate limit</span>
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; font-weight: 600; color: var(--surface-800);">20 / minute</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; padding: 14px 22px;">
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Writes</span>
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; font-weight: 600; color: var(--surface-800);">none</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div style="display: flex; flex-direction: column;">
+        <div style="display: flex; gap: 2px; padding: 0 6px; overflow-x: auto; background: var(--surface-100); border: 1px solid var(--border-color); border-bottom: 0; border-radius: var(--radius-xl) var(--radius-xl) 0 0;">
+          <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="5">
+            <div style="padding-top: 6px;">
+              <sc-if value="{{ tab.isActive }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ tab.select }}" style="display: flex; align-items: center; gap: 8px; padding: 11px 18px; margin-bottom: -1px; border: 1px solid var(--border-color); border-bottom: 1px solid var(--card-bg); border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--card-bg); font: inherit; font-size: 13.5px; font-weight: 600; color: var(--primary-600); cursor: pointer; white-space: nowrap;">
+                  <i class="{{ tab.icon }}" style="font-size: 12px;"></i>{{ tab.label }}
+                </button>
+              </sc-if>
+              <sc-if value="{{ tab.isIdle }}" hint-placeholder-val="{{ true }}">
+                <button onClick="{{ tab.select }}" style="display: flex; align-items: center; gap: 8px; padding: 11px 18px; margin-bottom: -1px; border: 1px solid transparent; border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: transparent; font: inherit; font-size: 13.5px; font-weight: 500; color: var(--text-muted); cursor: pointer; white-space: nowrap; transition: color var(--transition-fast), background var(--transition-fast);" style-hover="color: var(--surface-800); background: var(--surface-50);">
+                  <i class="{{ tab.icon }}" style="font-size: 12px;"></i>{{ tab.label }}
+                </button>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="background: var(--surface-50); border: 1px solid var(--border-color); border-radius: 0 0 var(--radius-xl) var(--radius-xl); padding: 26px 24px; display: flex; flex-direction: column; gap: 24px;">
+
+      <sc-if value="{{ onParams }}" hint-placeholder-val="{{ false }}">
+        <section style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; color: var(--heading-color);">Parameters</h2>
+            <span style="font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--text-muted); border: 1px solid var(--border-color); border-radius: var(--radius-full); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">1</span>
+          </div>
+          <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); padding: 20px;">
+            <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px dashed var(--surface-200);">
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; font-weight: 600; color: var(--heading-color);">barcode</span>
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);">query</span>
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--orange-700);">required</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; padding-top: 14px; padding-left: 14px;">
+              <span style="color: var(--surface-400); font-family: var(--font-mono, ui-monospace, monospace);">—</span>
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; color: var(--surface-800);">barcode</span>
+              <span style="font-size: 10.5px; font-family: var(--font-mono, ui-monospace, monospace); padding: 2px 7px; border-radius: var(--radius-xs); background: var(--primary-50); color: var(--primary-700);">string</span>
+            </div>
+          </div>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ onResponses }}" hint-placeholder-val="{{ true }}">
+        <section style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; color: var(--heading-color);">Responses</h2>
+            <span style="font-size: 11px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--text-muted); border: 1px solid var(--border-color); border-radius: var(--radius-full); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">2</span>
+          </div>
+          <sc-for list="{{ responses }}" as="res" hint-placeholder-count="2">
+            <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); overflow: hidden;">
+              <button onClick="{{ res.toggle }}" style="width: 100%; display: flex; align-items: flex-start; gap: 14px; padding: 16px 20px; background: transparent; border: 0; cursor: pointer; font: inherit; text-align: left;">
+                <span style="flex: 0 0 auto; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: var(--radius-sm); background: {{ res.codeBg }}; color: {{ res.codeFg }};">{{ res.code }}</span>
+                <span style="flex: 1; font-size: 13.5px; line-height: 1.65; color: var(--text-color);">{{ res.summary }}</span>
+                <i class="{{ res.chevron }}" style="font-size: 11px; color: var(--text-muted); margin-top: 5px;"></i>
+              </button>
+              <sc-if value="{{ res.open }}" hint-placeholder-val="{{ true }}">
+                <div style="padding: 0 20px 20px;">
+                  <div style="border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--surface-50); border-bottom: 1px solid var(--border-color);">
+                      <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Content type</span>
+                      <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--surface-700);">application/json</span>
+                    </div>
+                    <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+                      <sc-for list="{{ res.rows }}" as="row" hint-placeholder-count="6">
+                        <div style="display: flex; flex-direction: column; gap: 3px; padding-left: {{ row.pad }};">
+                          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <span style="color: var(--surface-300); font-family: var(--font-mono, ui-monospace, monospace);">—</span>
+                            <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; font-weight: 500; color: var(--heading-color);">{{ row.name }}</span>
+                            <sc-for list="{{ row.tags }}" as="tag" hint-placeholder-count="2">
+                              <span style="font-size: 10.5px; font-family: var(--font-mono, ui-monospace, monospace); padding: 2px 7px; border-radius: var(--radius-xs); background: {{ tag.bg }}; color: {{ tag.fg }};">{{ tag.label }}</span>
+                            </sc-for>
+                          </div>
+                          <div style="padding-left: 26px; font-size: 12.5px; line-height: 1.6; color: var(--text-muted);">{{ row.desc }}</div>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ onTryIt }}" hint-placeholder-val="{{ false }}">
+        <section style="display: flex; flex-direction: column; gap: 18px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; color: var(--heading-color);">Try it</h2>
+          <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border-color); flex-wrap: wrap;">
+              <span style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; font-weight: 700; color: var(--heading-color);">{{ method }}<i class="pi pi-chevron-down" style="font-size: 9px; color: var(--text-muted);"></i></span>
+              <span style="flex: 1; min-width: 220px; display: flex; align-items: center; height: 36px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--surface-50); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; color: var(--heading-color); overflow: hidden; white-space: nowrap;">{{ path }}</span>
+              <span style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); font-size: 12.5px; color: var(--text-muted);">test_kurum <span style="font-family: var(--font-mono, ui-monospace, monospace); color: var(--surface-800);">****de03</span><i class="pi pi-chevron-down" style="font-size: 9px;"></i></span>
+              <button style="height: 36px; padding: 0 16px; border: 0; border-radius: var(--radius-sm); background: var(--primary-500); color: #fff; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: background var(--transition-fast);" style-hover="background: var(--primary-600);" style-active="background: var(--primary-700);">Send</button>
+            </div>
+            <div style="display: flex; align-items: flex-end; gap: 12px; padding: 14px; flex-wrap: wrap;">
+              <label style="display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 200px;">
+                <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Query · barcode</span>
+                <input placeholder="9781234567897" style="height: 38px; padding: 0 12px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--field-bg); font: inherit; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; color: var(--heading-color); outline: none;" style-focus="border-color: var(--primary-500); box-shadow: 0 0 0 1px var(--primary-500);">
+              </label>
+              <span style="display: flex; align-items: center; gap: 8px; height: 38px; font-size: 12px; color: var(--text-muted);">Base <span style="font-family: var(--font-mono, ui-monospace, monospace); color: var(--primary-700);">https://congress-app.test/api</span></span>
+              <span style="display: flex; align-items: center; gap: 6px; height: 38px; font-size: 12px; color: var(--primary-600); cursor: pointer;"><i class="pi pi-plus" style="font-size: 9px;"></i>Short-lived profile</span>
+            </div>
+            <div style="display: flex; align-items: flex-start; gap: 12px; padding: 14px; background: var(--surface-900);">
+              <span style="flex: 1; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.75; color: var(--surface-200); white-space: pre-wrap; overflow-wrap: anywhere;">curl --request GET \
+  'https://congress-app.test/api{{ path }}' \
+  --header 'X-Api-Key: ****de03'</span>
+              <button title="Copy curl" style="width: 28px; height: 28px; flex: 0 0 28px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--surface-700); border-radius: var(--radius-sm); background: transparent; color: var(--surface-400); cursor: pointer;" style-hover="color: #fff; background: var(--surface-800);"><i class="pi pi-copy" style="font-size: 11px;"></i></button>
+            </div>
+          </div>
+
+          <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border-color);">
+              <span style="font-size: 15px; font-weight: 600; color: var(--heading-color);">Response</span>
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-sm); background: var(--green-100); color: var(--green-700);">200</span>
+              <span style="font-size: 12.5px; color: var(--text-muted);">Known badge, participant already synced</span>
+              <span style="margin-left: auto; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; color: var(--text-muted);">312 ms · 1.1 KB</span>
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);">
+              <div style="padding: 18px 20px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 8px;">
+                <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Request</span>
+                <pre style="margin: 0; padding: 14px; border-radius: var(--radius-lg); background: var(--surface-50); border: 1px solid var(--border-color); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.7; color: var(--surface-800); overflow-x: auto;">{
+  "barcode": "83601972"
+}</pre>
+              </div>
+              <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Response body</span>
+                  <button title="Copy" style="width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-muted); cursor: pointer;" style-hover="background: var(--surface-100); color: var(--surface-800);"><i class="pi pi-copy" style="font-size: 11px;"></i></button>
+                </div>
+                <div style="padding: 16px 14px; border-radius: var(--radius-lg); background: var(--surface-900); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.75; overflow: auto; max-height: 440px;">
+                  <sc-for list="{{ tryRows }}" as="row" hint-placeholder-count="12">
+                    <div style="display: flex; align-items: center; gap: 6px; white-space: nowrap; margin-left: {{ row.pad }};">
+                      <sc-if value="{{ row.hasToggle }}" hint-placeholder-val="{{ false }}">
+                        <button onClick="{{ row.toggle }}" style="width: 14px; height: 14px; flex: 0 0 14px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; padding: 0; cursor: pointer; color: var(--surface-500);" style-hover="color: #fff;"><i class="{{ row.caret }}" style="font-size: 8px;"></i></button>
+                      </sc-if>
+                      <sc-if value="{{ row.noToggle }}" hint-placeholder-val="{{ true }}">
+                        <span style="width: 14px; flex: 0 0 14px;"></span>
+                      </sc-if>
+                      <sc-if value="{{ row.hasKey }}" hint-placeholder-val="{{ true }}">
+                        <span><span style="color: var(--primary-300);">{{ row.key }}</span><span style="color: var(--surface-400);">:</span></span>
+                      </sc-if>
+                      <span style="color: {{ row.valColor }};">{{ row.val }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ onPrompt }}" hint-placeholder-val="{{ false }}">
+        <section style="display: flex; flex-direction: column; gap: 18px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; color: var(--heading-color);">AI prompt</h2>
+            <button style="height: 36px; padding: 0 16px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--surface-700); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;" style-hover="background: var(--surface-100);">Copy full prompt</button>
+          </div>
+          <div style="border-left: 3px solid var(--primary-500); background: var(--primary-50); border-radius: 0 var(--radius-lg) var(--radius-lg) 0; padding: 16px 20px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; line-height: 1.7; color: var(--primary-800);">An unrecognised barcode is a 200 answer with valid=false, not an error; only 404, 422 and 500 are failures.</div>
+          <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); padding: 22px 24px; display: flex; flex-direction: column; gap: 14px;">
+            <div style="font-size: 16px; font-weight: 600; color: var(--heading-color);">Pitfalls</div>
+            <ol style="margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.7; color: var(--text-color);">
+              <li>The congress is resolved from the X-Api-Key header alone: there is no application parameter and no input can widen that scope.</li>
+              <li>A barcode the upstream does not know returns HTTP 200 with valid=false and participant=null. Do not look for it in the error channel.</li>
+              <li>500 means the upstream refused our credentials, timed out or answered an unusable shape. It is retryable and must never be rendered as an invalid badge.</li>
+              <li>404 means the barcode_entry module is off for this congress; 422 means the congress has no Event Begin connection at all. Neither is fixed by re-scanning.</li>
+              <li>participant.id is null until the person is synced into this congress (is_synced=false). Use external_id instead, which is the same string POST /devices takes as external_participant_id.</li>
+              <li>participant.badge is null when the upstream tier does not resolve to one of this congress's badge definitions.</li>
+              <li>The payload carries no photo, e-mail, bio or upstream join key, and a scan writes nothing. This is a badge verdict, not a person lookup.</li>
+              <li>The dedicated throttle bucket keys on IP alone (20 per minute plus 300 per hour), not on the API key or the barcode.</li>
+            </ol>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <sc-for list="{{ examples }}" as="ex" hint-placeholder-count="3">
+              <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden;">
+                <button onClick="{{ ex.toggle }}" style="width: 100%; display: flex; align-items: center; gap: 10px; padding: 14px 18px; background: transparent; border: 0; font: inherit; font-size: 13.5px; font-weight: 600; color: var(--heading-color); cursor: pointer; text-align: left;" style-hover="background: var(--surface-50);">
+                  <i class="{{ ex.chevron }}" style="font-size: 10px; color: var(--text-muted);"></i>
+                  <span style="flex: 1;">{{ ex.label }}</span>
+                  <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-sm); background: {{ ex.codeBg }}; color: {{ ex.codeFg }};">{{ ex.code }}</span>
+                </button>
+                <sc-if value="{{ ex.open }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); border-top: 1px solid var(--border-color);">
+                    <div style="padding: 16px 18px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 8px;">
+                      <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Request</span>
+                      <pre style="margin: 0; padding: 14px; border-radius: var(--radius-lg); background: var(--surface-50); border: 1px solid var(--border-color); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.7; color: var(--surface-800); overflow-x: auto;">{{ ex.req }}</pre>
+                    </div>
+                    <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;">
+                      <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Response</span>
+                      <div style="padding: 16px 14px; border-radius: var(--radius-lg); background: var(--surface-900); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.75; overflow: auto; max-height: 420px;">
+                        <sc-for list="{{ ex.rows }}" as="row" hint-placeholder-count="10">
+                          <div style="display: flex; align-items: center; gap: 6px; white-space: nowrap; margin-left: {{ row.pad }};">
+                            <sc-if value="{{ row.hasToggle }}" hint-placeholder-val="{{ false }}">
+                              <button onClick="{{ row.toggle }}" style="width: 14px; height: 14px; flex: 0 0 14px; display: flex; align-items: center; justify-content: center; border: 0; background: transparent; padding: 0; cursor: pointer; color: var(--surface-500);" style-hover="color: #fff;"><i class="{{ row.caret }}" style="font-size: 8px;"></i></button>
+                            </sc-if>
+                            <sc-if value="{{ row.noToggle }}" hint-placeholder-val="{{ true }}">
+                              <span style="width: 14px; flex: 0 0 14px;"></span>
+                            </sc-if>
+                            <sc-if value="{{ row.hasKey }}" hint-placeholder-val="{{ true }}">
+                              <span><span style="color: var(--primary-300);">{{ row.key }}</span><span style="color: var(--surface-400);">:</span></span>
+                            </sc-if>
+                            <span style="color: {{ row.valColor }};">{{ row.val }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button style="height: 38px; padding: 0 16px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--surface-700); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;" style-hover="background: var(--surface-100);">Copy MCP tool definition</button>
+            <button style="height: 38px; padding: 0 16px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--surface-700); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;" style-hover="background: var(--surface-100);">Copy llms.txt section</button>
+          </div>
+          <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-xl); padding: 22px 24px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 16px; font-weight: 600; color: var(--heading-color);">Operation changelog</div>
+            <div style="font-size: 12.5px; color: var(--text-muted);">The prompt above is always current; first-time integrators can skip this history.</div>
+            <div style="display: flex; gap: 24px; padding-top: 14px; margin-top: 8px; border-top: 1px solid var(--border-color);">
+              <span style="font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; color: var(--text-muted); flex: 0 0 110px;">2026-08-15</span>
+              <span style="font-size: 13px; color: var(--text-color);">Badge barcode verification endpoint added.</span>
+            </div>
+          </div>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ onDiff }}" hint-placeholder-val="{{ false }}">
+        <section style="display: flex; flex-direction: column; gap: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.015em; color: var(--heading-color);">Spec diff</h2>
+            <div style="font-size: 12.5px; color: var(--text-muted);">Paste the JSON emitted by <span style="font-family: var(--font-mono, ui-monospace, monospace);">php artisan api-dock:diff --json</span>. The documentation app does not request a diff endpoint.</div>
+          </div>
+          <label style="display: flex; flex-direction: column; gap: 8px;">
+            <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);">Diff JSON</span>
+            <textarea rows="6" style="width: 100%; padding: 14px 16px; border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--field-bg); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; line-height: 1.7; color: var(--heading-color); resize: vertical; outline: none;" style-focus="border-color: var(--primary-500); box-shadow: 0 0 0 1px var(--primary-500);">{ "has_breaking": false, "changes": [] }</textarea>
+          </label>
+        </section>
+      </sc-if>
+
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showTryIt&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;},&quot;showAgentContext&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;}}">
+const OPS = [
+  { g: "Anketler", items: [
+    { id: "s1", m: "GET", p: "/mobile/v1/surveys", t: "Şu anda yanıtlanabilir anketler – operasyon listesi", d: "Kongrenin açık anketleri; her kayıt erişim token'ı, soru sayısı ve kapanış tarihiyle döner.", oid: "tenant.api.mobile.surveys.index" },
+    { id: "s2", m: "GET", p: "/mobile/v1/surveys/{token}", t: "Tek anket – erişim token'ı ile, soruları ve seçenekleriyle", d: "Token geçerliyse anketin tüm soruları, soru tipleri ve seçenekleri döner.", oid: "tenant.api.mobile.surveys.show" },
+    { id: "s3", m: "GET", p: "/mobile/v1/surveys/{token}/results", t: "Anket sonucu – yalnız özet sayılar, operatör açtıysa", d: "Yalnızca toplam sayılar döner; bireysel yanıtlar hiçbir uçta yayınlanmaz.", oid: "tenant.api.mobile.surveys.results" },
+    { id: "s4", m: "POST", p: "/mobile/v1/surveys/{token}/responses", t: "Anketi yanıtla — cihaz başına bir kez, anonim olarak", d: "Gövde `device_id` ve `answers` taşır; her yanıt bir soruya aittir ve soru tipine göre `option_ids`, `rating` ya da `text` alanını doldurur. Zorunlu soruların hepsi yanıtlanmalıdır, bilinmeyen alanlar reddedilir. Aynı cihaz ikinci kez gönderirse 409, anket kapanmışsa 422 döner. Kimlik bilgisi istenmez ve saklanmaz.", oid: "tenant.api.mobile.surveys.responses.store" } ] },
+  { g: "Barcode", items: [
+    { id: "b1", m: "GET", p: "/mobile/v1/participants/barcode-check", t: "Yaka kartı barkodunu ara sistemde doğrular", d: "Barkod tanınırsa katılımcının adı, unvanı ve yaka kartı kategorisi döner; kongrede senkronlanmış bir kaydı varsa yerel kimliği de eklenir. Tanınmayan barkod hata değildir, `valid: false` ile 200 döner. Uç yalnız \"Barkod Giriş\" modülü açık olan kongrelerde yanıt verir. Hiçbir kayıt oluşturulmaz.", oid: "tenant.api.mobile.participants.barcode-check", params: true, prompt: true } ] },
+  { g: "Bildiriler", items: [
+    { id: "a1", m: "GET", p: "/mobile/v1/abstracts", t: "Kongrenin bildiri kitabı – yayın numarasıyla", d: "Yayındaki tüm bildiriler; başlık, yayın numarası ve yazar listesiyle sayfalanır.", oid: "tenant.api.mobile.abstracts.index" },
+    { id: "a2", m: "GET", p: "/mobile/v1/abstracts/{applicationAbstract}", t: "Tek bildiri – UUID ile, metniyle birlikte", d: "Bildirinin tam metni, yazarları ve kurum bilgileri döner.", oid: "tenant.api.mobile.abstracts.show" } ] },
+  { g: "Device", items: [
+    { id: "d1", m: "POST", p: "/mobile/v1/devices", t: "Mobil cihazı kongreye kaydeder", d: "Cihazı bildirim gönderimi için kaydeder; aynı cihaz tekrar gönderildiğinde kayıt güncellenir.", oid: "tenant.api.mobile.devices.store" } ] },
+  { g: "Duyurular", items: [
+    { id: "n1", m: "GET", p: "/mobile/v1/announcements", t: "Kongrenin yayındaki duyuruları – operasyon listesi", d: "Yayın tarihine göre sıralanmış duyurular, sayfalama ile döner.", oid: "tenant.api.mobile.announcements.index" },
+    { id: "n2", m: "GET", p: "/mobile/v1/announcements/headlines", t: "Yalnızca manşet duyurular – ana ekran için", d: "Ana ekranda gösterilecek manşetler; metin gövdesi olmadan döner.", oid: "tenant.api.mobile.announcements.headlines" },
+    { id: "n3", m: "GET", p: "/mobile/v1/announcements/{announcement}", t: "Tek bir duyuru, metniyle birlikte", d: "Duyurunun tam metni ve yayın bilgileri döner.", oid: "tenant.api.mobile.announcements.show" } ] },
+  { g: "Gallery", items: [
+    { id: "g1", m: "GET", p: "/mobile/v1/gallery-images", t: "Kongrenin galeri fotoğrafları – başlık, sıra ve URL ile", d: "Galeri fotoğrafları; başlık, sıra numarası ve görsel URL'leriyle döner.", oid: "tenant.api.mobile.gallery-images.index" } ] },
+  { g: "Galleryvideo", items: [
+    { id: "v1", m: "GET", p: "/mobile/v1/gallery-videos", t: "Kongrenin galeri videoları – başlık, sağlayıcı ve bağlantı ile", d: "Galeri videoları; başlık, sağlayıcı ve oynatma bağlantısıyla döner.", oid: "tenant.api.mobile.gallery-videos.index" } ] },
+  { g: "Genel Bilgi", items: [
+    { id: "i1", m: "GET", p: "/mobile/v1/general-infos", t: "Genel bilgiler menüsü – tüm ağaç (üç seviye)", d: "Genel bilgi başlıkları üç seviyeli ağaç olarak tek istekte döner.", oid: "tenant.api.mobile.general-infos.index" } ] },
+  { g: "İçerik", items: [
+    { id: "c1", m: "GET", p: "/mobile/v1/contents", t: "İçerik menüsü – bu kongrenin içerik yapısı", d: "Kongrenin içerik kategorileri ve blok sayıları döner.", oid: "tenant.api.mobile.contents.index" },
+    { id: "c2", m: "GET", p: "/mobile/v1/contents/{category}", t: "Bir kategorideki tüm içerik blokları – önce sıra numarası", d: "Kategorinin blokları sıra numarasına göre döner.", oid: "tenant.api.mobile.contents.category" },
+    { id: "c3", m: "GET", p: "/mobile/v1/committees", t: "Kurullar – her kurul, üyeleriyle birlikte, sırayla", d: "Kongrenin kurulları ve her kurulun üyeleri sırayla döner.", oid: "tenant.api.mobile.committees.index" } ] }
+];
+
+const TAG = {
+  required: { bg: "var(--orange-100)", fg: "var(--orange-700)" },
+  type: { bg: "var(--primary-50)", fg: "var(--primary-700)" },
+  nullable: { bg: "#f3e8ff", fg: "#7e22ce" },
+  plain: { bg: "var(--surface-100)", fg: "var(--surface-600)" }
+};
+const tag = (label, kind) => ({ label, bg: TAG[kind].bg, fg: TAG[kind].fg });
+
+const ENVELOPE = [
+  { pad: "0px", name: "response", tags: [tag("object", "plain")], desc: "" },
+  { pad: "20px", name: "success", tags: [tag("required", "required"), tag("boolean", "type")], desc: "True for 2xx responses, false for 4xx/5xx errors." },
+  { pad: "20px", name: "status", tags: [tag("required", "required"), tag("integer", "type")], desc: "HTTP status code mirrored in the envelope for client convenience." },
+  { pad: "20px", name: "message", tags: [tag("required", "required"), tag("string", "type")], desc: "Human-readable English message – safe to surface in UI." },
+  { pad: "20px", name: "data", tags: [tag("required", "required"), tag("object | null", "type"), tag("nullable", "nullable")], desc: "Primary payload. Null on errors and on 204 responses." },
+  { pad: "20px", name: "errors", tags: [tag("object | null", "type"), tag("nullable", "nullable")], desc: "Field-level validation errors. Present only on 422 Validation error responses." },
+  { pad: "20px", name: "meta", tags: [tag("object | null", "type"), tag("nullable", "nullable")], desc: "Auxiliary metadata such as pagination (current_page, last_page, per_page, total, etc.)." },
+  { pad: "20px", name: "trace_id", tags: [tag("string", "type")], desc: "Per-request UUID (also returned via the X-Request-ID header) for log correlation." },
+  { pad: "20px", name: "debug", tags: [tag("object | null", "type"), tag("nullable", "nullable")], desc: "Exception details emitted only when APP_DEBUG=true. Must not be trusted in production." }
+];
+
+const VALIDATION = [
+  { pad: "0px", name: "response", tags: [tag("object", "plain")], desc: "" },
+  { pad: "20px", name: "message", tags: [tag("required", "required"), tag("string", "type")], desc: "Errors overview." },
+  { pad: "20px", name: "errors", tags: [tag("required", "required"), tag("object", "type")], desc: "A detailed description of each field that failed validation." },
+  { pad: "44px", name: "additional properties", tags: [tag("array", "type")], desc: "" },
+  { pad: "68px", name: "items", tags: [tag("required", "required"), tag("string", "type")], desc: "" }
+];
+
+const EXAMPLES = [
+  {
+    label: "Known badge, participant already synced",
+    code: "200",
+    req: '{\n  "barcode": "83601972"\n}',
+    res: '{\n  "success": true,\n  "status": 200,\n  "message": "Operation successful.",\n  "data": {\n    "valid": true,\n    "participant": {\n      "id": "9f1c2b4e-5a7d-4c1e-9b3a-2d8f6e0a1c34",\n      "external_id": "26787",\n      "first_name": "Abbasali",\n      "last_name": "Abbasaliyev",\n      "title": "dr",\n      "organization": "Baku Universitesi",\n      "badge": {\n        "id": "3f7a9d2c-0b41-4e6f-a05d-7c1b93e2f480",\n        "name": "KATILIMCI",\n        "description": null,\n        "background_color": "#000000",\n        "text_color": "#ffffff",\n        "icon": null,\n        "event_date": null,\n        "sort_order": 1,\n        "updated_at": "2026-08-15T09:12:33.000000Z"\n      },\n      "is_synced": true\n    }\n  },\n  "meta": {\n    "locale": "tr",\n    "available_locales": [\n      "tr",\n      "en"\n    ]\n  }\n}'
+  },
+  {
+    label: "Known badge, person not imported into this congress yet",
+    code: "200",
+    req: '{\n  "barcode": "83601999"\n}',
+    res: '{\n  "success": true,\n  "status": 200,\n  "message": "Operation successful.",\n  "data": {\n    "valid": true,\n    "participant": {\n      "id": null,\n      "external_id": "31402",\n      "first_name": "Leyla",\n      "last_name": "Kerimova",\n      "title": "prof. dr.",\n      "organization": "Bakü Devlet Üniversitesi",\n      "badge": null,\n      "is_synced": false\n    }\n  },\n  "meta": {\n    "locale": "tr",\n    "available_locales": [\n      "tr",\n      "en"\n    ]\n  }\n}'
+  },
+  {
+    label: "Barcode the upstream does not know",
+    code: "200",
+    req: '{\n  "barcode": "00000000"\n}',
+    res: '{\n  "success": true,\n  "status": 200,\n  "message": "Operation successful.",\n  "data": {\n    "valid": false,\n    "participant": null\n  },\n  "meta": {\n    "locale": "tr",\n    "available_locales": [\n      "tr",\n      "en"\n    ]\n  }\n}'
+  }
+];
+
+const JC = {
+  key: "var(--primary-300)",
+  str: "#7ee2a8",
+  num: "#f6b45a",
+  bool: "#c4a2ff",
+  nul: "#c4a2ff",
+  punct: "var(--surface-400)"
+};
+
+function leafColor(v) {
+  if (v === null) return JC.nul;
+  if (typeof v === "string") return JC.str;
+  if (typeof v === "number") return JC.num;
+  if (typeof v === "boolean") return JC.bool;
+  return JC.punct;
+}
+
+function flattenJson(node, keyLabel, path, depth, out, collapsed, toggler, trailing) {
+  const pad = depth * 16 + "px";
+  const isObj = node !== null && typeof node === "object";
+  if (isObj) {
+    const arr = Array.isArray(node);
+    const open = arr ? "[" : "{";
+    const close = arr ? "]" : "}";
+    const shut = !!collapsed[path];
+    const entries = arr ? node.map((v, i) => [null, v]) : Object.keys(node).map(k => [k, node[k]]);
+    out.push({
+      pad, hasToggle: true, noToggle: false,
+      caret: shut ? "pi pi-chevron-right" : "pi pi-chevron-down",
+      toggle: toggler(path),
+      key: keyLabel === null ? "" : '"' + keyLabel + '"',
+      hasKey: keyLabel !== null,
+      val: shut ? open + " … " + close + (trailing ? "," : "") : open,
+      valColor: JC.punct
+    });
+    if (!shut) {
+      entries.forEach((e, i) => flattenJson(e[1], e[0], path + "/" + (e[0] === null ? i : e[0]), depth + 1, out, collapsed, toggler, i < entries.length - 1));
+      out.push({ pad, hasToggle: false, noToggle: true, key: "", hasKey: false, val: close + (trailing ? "," : ""), valColor: JC.punct });
+    }
+  } else {
+    out.push({
+      pad, hasToggle: false, noToggle: true,
+      key: keyLabel === null ? "" : '"' + keyLabel + '"',
+      hasKey: keyLabel !== null,
+      val: JSON.stringify(node) + (trailing ? "," : ""),
+      valColor: leafColor(node)
+    });
+  }
+}
+
+class Component extends DCLogic {
+  state = { active: "b1", query: "", tab: "responses", closedGroups: {}, open: { r200: true, r422: true }, ex: {}, json: {} };
+
+  method(m) {
+    return m === "GET"
+      ? { bg: "var(--primary-50)", fg: "var(--primary-700)" }
+      : { bg: "var(--amber-100)", fg: "var(--amber-700)" };
+  }
+
+  activeOp() {
+    let found = null;
+    OPS.forEach(g => g.items.forEach(i => { if (i.id === this.state.active) found = i; }));
+    return found || OPS[1].items[0];
+  }
+
+  renderVals() {
+    const q = this.state.query.trim().toLowerCase();
+    const match = i => !q || (i.t + " " + i.p + " " + i.m).toLowerCase().includes(q);
+    const decorate = i => {
+      const isActive = i.id === this.state.active;
+      const mc = this.method(i.m);
+      return {
+        method: i.m, title: i.t, path: i.p, badgeBg: mc.bg, badgeFg: mc.fg,
+        isActive, isIdle: !isActive,
+        select: () => this.setState({ active: i.id })
+      };
+    };
+
+    const groups = OPS.map(g => {
+      const isOpen = !this.state.closedGroups[g.g] || !!q;
+      return {
+        name: g.g, count: g.items.length,
+        items: isOpen ? g.items.filter(match).map(decorate) : [],
+        matches: g.items.filter(match).length,
+        isOpen,
+        chevron: isOpen ? "pi pi-chevron-down" : "pi pi-chevron-right",
+        toggle: () => this.setState(s => ({ closedGroups: Object.assign({}, s.closedGroups, { [g.g]: !s.closedGroups[g.g] }) }))
+      };
+    }).filter(g => g.matches > 0);
+
+    const op = this.activeOp();
+    const mc = this.method(op.m);
+    const toggleRes = k => () => this.setState(s => ({ open: Object.assign({}, s.open, { [k]: !s.open[k] }) }));
+
+    const responses = [
+      { code: "200", codeBg: "var(--green-100)", codeFg: "var(--green-700)", summary: "Standard API response envelope.", rows: ENVELOPE, open: !!this.state.open.r200, chevron: this.state.open.r200 ? "pi pi-chevron-up" : "pi pi-chevron-down", toggle: toggleRes("r200") },
+      { code: "422", codeBg: "var(--amber-100)", codeFg: "var(--amber-700)", summary: "Validation error", rows: VALIDATION, open: !!this.state.open.r422, chevron: this.state.open.r422 ? "pi pi-chevron-up" : "pi pi-chevron-down", toggle: toggleRes("r422") }
+    ];
+
+    const toggler = ns => path => () => this.setState(s => {
+      const c = Object.assign({}, s.json);
+      c[ns + path] = !c[ns + path];
+      return { json: c };
+    });
+    const jsonRows = (text, ns) => {
+      const view = {};
+      Object.keys(this.state.json || {}).forEach(k => { if (k.indexOf(ns) === 0) view[k.slice(ns.length)] = this.state.json[k]; });
+      const out = [];
+      try { flattenJson(JSON.parse(text), null, "", 0, out, view, toggler(ns), false); } catch (err) { return []; }
+      return out;
+    };
+
+    const examples = EXAMPLES.map((e, n) => ({
+      label: e.label, code: e.code, codeBg: e.code === "200" ? "var(--green-100)" : "var(--amber-100)", codeFg: e.code === "200" ? "var(--green-700)" : "var(--amber-700)",
+      req: e.req, res: e.res,
+      rows: jsonRows(e.res, "ex" + n + ":"),
+      open: !!this.state.ex[n],
+      chevron: this.state.ex[n] ? "pi pi-chevron-down" : "pi pi-chevron-right",
+      toggle: () => this.setState(s => ({ ex: Object.assign({}, s.ex, { [n]: !s.ex[n] }) }))
+    }));
+
+    const showTryIt = this.props.showTryIt ?? true;
+    const showPrompt = (this.props.showAgentContext ?? true) && !!op.prompt;
+    const defs = [
+      { id: "params", label: "Parameters", icon: "pi pi-sliders-h", on: !!op.params },
+      { id: "responses", label: "Responses", icon: "pi pi-server", on: true },
+      { id: "tryit", label: "Try it", icon: "pi pi-play", on: showTryIt },
+      { id: "prompt", label: "AI prompt", icon: "pi pi-sparkles", on: showPrompt },
+      { id: "diff", label: "Spec diff", icon: "pi pi-code", on: true }
+    ].filter(t => t.on);
+
+    const current = defs.some(t => t.id === this.state.tab) ? this.state.tab : "responses";
+    const tabs = defs.map(t => ({
+      label: t.label, icon: t.icon,
+      isActive: t.id === current, isIdle: t.id !== current,
+      select: () => this.setState({ tab: t.id })
+    }));
+
+    return {
+      groups, tabs, examples, responses,
+      tryRows: jsonRows(EXAMPLES[0].res, "try:"),
+      query: this.state.query,
+      onQuery: e => this.setState({ query: e.target.value }),
+      method: op.m, path: op.p, title: op.t, description: op.d,
+      badgeBg: mc.bg, badgeFg: mc.fg,
+      onParams: current === "params", onResponses: current === "responses",
+      onTryIt: current === "tryit", onPrompt: current === "prompt", onDiff: current === "diff"
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+/* ============================================================================
+   LVNTR STARTER KIT — COLORS & TYPE FOUNDATIONS
+   ----------------------------------------------------------------------------
+   Extracted from the PrimeVue 4 "Material" preset + Tailwind CSS 4 theme used by
+   lvntrdev/laravel-starter-kit. These are the canonical design tokens.
+
+   Token model (mirrors PrimeVue):
+     primitive  → raw values (color scales, radius)
+     semantic   → contextual roles (primary, surface, text, severities)
+     mode        → light (slate surfaces) / dark (gray surfaces)
+
+   Base type system is 14px-rooted: html font-size is 0.875rem (= 14px of the
+   browser default 16px). All rem values resolve against that 14px root.
+
+   NOTE (api-dock): this is the DESIGN SOURCE copied out of the Claude Design
+   project for reference. The package's own stylesheet ports these tokens; the
+   Google Fonts @import from the original is deliberately dropped there, because
+   the package self-hosts Instrument Sans through @fontsource/instrument-sans.
+   ============================================================================ */
+
+:root {
+    /* ───────────────────────── PRIMITIVE · BORDER RADIUS ─────────────────── */
+    --radius-none: 0;
+    --radius-xs: 2px;
+    --radius-sm: 4px;   /* default: form fields, buttons, tags, nav items */
+    --radius-md: 6px;   /* modals / dialogs */
+    --radius-lg: 8px;   /* header/icon buttons, KPI icon chips */
+    --radius-xl: 12px;  /* dashboard content cards (rounded-xl) */
+    --radius-full: 9999px;
+
+    /* ───────────────────────── PRIMITIVE · PRIMARY (BRAND BLUE) ──────────── */
+    /* The single brand accent. Pure blue, not indigo. */
+    --primary-50:  #E6F0FF;
+    --primary-100: #CCE0FF;
+    --primary-200: #99C2FF;
+    --primary-300: #66A3FF;
+    --primary-400: #3385FF;
+    --primary-500: #0069FF;  /* ← brand blue */
+    --primary-600: #0054CC;
+    --primary-700: #003F99;
+    --primary-800: #002A66;
+    --primary-900: #001A40;
+    --primary-950: #001029;
+
+    /* ───────────────────────── PRIMITIVE · SLATE (LIGHT SURFACES) ────────── */
+    --slate-50:  #f8fafc;
+    --slate-100: #f1f5f9;
+    --slate-200: #e2e8f0;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
+    --slate-950: #020617;
+
+    /* ───────────────────────── PRIMITIVE · GRAY (DARK SURFACES) ──────────── */
+    --gray-50:  #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --gray-950: #030712;
+
+    /* ───────────────────────── PRIMITIVE · SEMANTIC PALETTES ─────────────
+       Severity colors come straight from the Tailwind palette. Tags/badges and
+       toasts use these. (-500 solid, -100 soft bg, -700 soft text.) */
+    --green-500:  #22c55e;  --green-100:  #dcfce7;  --green-700:  #15803d;   /* success */
+    --amber-500:  #f59e0b;  --amber-100:  #fef3c7;  --amber-700:  #b45309;   /* warn  */
+    --orange-500: #f97316;  --orange-100: #ffedd5;  --orange-700: #c2410c;
+    --red-500:    #ef4444;  --red-100:    #fee2e2;  --red-700:    #b91c1c;   /* danger */
+    --blue-500:   #3b82f6;  --blue-100:   #dbeafe;  --blue-700:   #1d4ed8;   /* info  */
+    --sky-500:    #0ea5e9;  --emerald-500:#10b981;  --violet-500: #8b5cf6;
+    --indigo-500: #6366f1;  --teal-500:   #14b8a6;  --rose-500:   #f43f5e;
+    --cyan-500:   #06b6d4;  --purple-500: #a855f7;
+
+    /* ═════════════════════════ SEMANTIC · LIGHT MODE (default) ═══════════ */
+    /* Surfaces map to the SLATE scale. surface-0 is pure white. */
+    --surface-0:   #ffffff;
+    --surface-50:  var(--slate-50);
+    --surface-100: var(--slate-100);
+    --surface-200: var(--slate-200);
+    --surface-300: var(--slate-300);
+    --surface-400: var(--slate-400);
+    --surface-500: var(--slate-500);
+    --surface-600: var(--slate-600);
+    --surface-700: var(--slate-700);
+    --surface-800: var(--slate-800);
+    --surface-900: var(--slate-900);
+    --surface-950: var(--slate-950);
+
+    --primary-color:          var(--primary-500);
+    --primary-contrast:       #ffffff;
+    --primary-hover:          var(--primary-600);
+    --primary-active:         var(--primary-700);
+
+    --highlight-bg:           var(--primary-50);
+    --highlight-color:        var(--primary-700);
+
+    --text-color:             var(--surface-700);   /* body  */
+    --text-hover:             var(--surface-800);
+    --text-muted:             var(--surface-500);    /* secondary / meta */
+    --heading-color:          var(--surface-900);    /* headings, KPI values */
+
+    --border-color:           var(--surface-200);    /* card & divider borders */
+    --field-border:           var(--surface-300);
+    --field-border-hover:     var(--surface-400);
+    --field-bg:               var(--surface-0);
+
+    /* App chrome */
+    --content-bg:             var(--slate-100);       /* page background */
+    --card-bg:                var(--surface-0);
+    --sidebar-bg:             var(--surface-900);      /* dark sidebar even in light mode */
+    --sidebar-text:           var(--surface-200);
+    --sidebar-text-muted:     var(--surface-400);
+    --sidebar-hover-bg:       var(--surface-800);
+    --sidebar-active-bg:      var(--primary-color);
+    --sidebar-active-text:    #ffffff;
+    --sidebar-border:         var(--surface-700);
+    --sidebar-logo-bg:        var(--surface-950);
+    --header-bg:              var(--surface-0);
+    --header-text:            var(--surface-700);
+    --header-border:          var(--surface-200);
+
+    /* ───────────────────────── ELEVATION / SHADOW ───────────────────────── */
+    --shadow-sm:    0 1px 2px 0 rgba(0,0,0,0.05);
+    --shadow:       0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px -1px rgba(0,0,0,0.1);
+    --shadow-md:    0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);   /* overlays, card hover */
+    --shadow-modal: 0 24px 60px -20px rgba(15,14,25,0.35), 0 6px 20px -6px rgba(15,14,25,0.18);
+
+    /* ───────────────────────── MOTION ───────────────────────────────────── */
+    --transition-fast:    150ms ease;       /* color / hover states */
+    --transition-base:    0.2s ease;         /* default component transition */
+    --transition-layout:  300ms ease-in-out; /* sidebar collapse, submenu */
+    --focus-ring:         2px solid var(--primary-color);
+    --focus-ring-offset:  2px;
+
+    /* ───────────────────────── LAYOUT DIMENSIONS ────────────────────────── */
+    --sidebar-w:            280px;
+    --sidebar-collapsed-w:  80px;
+    --header-h:             64px;
+    --footer-h:             56px;
+    --content-pad:          24px;
+
+    /* ═════════════════════════ TYPOGRAPHY ═══════════════════════════════ */
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+
+    /* Type scale — px values are the rendered size at the 14px root. */
+    --text-xs:   0.857rem;  --lh-xs:   1.143rem;  /* 12 / 16 */
+    --text-sm:   0.929rem;  --lh-sm:   1.429rem;  /* 13 / 20 */
+    --text-base: 1rem;      --lh-base: 1.571rem;  /* 14 / 22 */
+    --text-lg:   1.143rem;  --lh-lg:   1.714rem;  /* 16 / 24 */
+    --text-xl:   1.286rem;  --lh-xl:   1.857rem;  /* 18 / 26 */
+    --text-2xl:  1.429rem;  --lh-2xl:  2rem;      /* 20 / 28 */
+    --text-3xl:  1.714rem;  --lh-3xl:  2.286rem;  /* 24 / 32 */
+    --text-4xl:  2.143rem;  --lh-4xl:  2.571rem;  /* 30 / 36 */
+    --text-5xl:  2.571rem;  --lh-5xl:  1;         /* 36 */
+
+    --weight-normal:   400;
+    --weight-medium:   500;   /* nav items, field labels */
+    --weight-semibold: 600;   /* headings, section titles, card titles */
+    --weight-bold:     700;   /* page headings, KPI values, toast summary */
+}
+
+/* ═════════════════════════ DARK MODE ═══════════════════════════════════
+   Activate by adding `.dark` to <html> (or any ancestor). Surfaces switch to
+   the GRAY scale; primary lightens to the 400 step for contrast. */
+.dark {
+    --surface-0:   #ffffff;   /* text-on-dark in PrimeVue's model */
+    --surface-50:  var(--gray-50);
+    --surface-100: var(--gray-100);
+    --surface-200: var(--gray-200);
+    --surface-300: var(--gray-300);
+    --surface-400: var(--gray-400);
+    --surface-500: var(--gray-500);
+    --surface-600: var(--gray-600);
+    --surface-700: var(--gray-700);
+    --surface-800: var(--gray-800);
+    --surface-900: var(--gray-900);
+    --surface-950: var(--gray-950);
+
+    --primary-color:   var(--primary-400);
+    --primary-hover:   var(--primary-300);
+    --primary-active:  var(--primary-200);
+    --primary-contrast: var(--gray-900);
+
+    --text-color:      #ffffff;
+    --text-hover:      #ffffff;
+    --text-muted:      var(--gray-400);
+    --heading-color:   #ffffff;
+
+    --border-color:    var(--gray-700);
+    --field-border:    var(--gray-600);
+    --field-border-hover: var(--gray-500);
+    --field-bg:        var(--gray-950);
+
+    --content-bg:      var(--gray-950);
+    --card-bg:         var(--gray-900);
+    --sidebar-bg:      var(--gray-950);
+    --sidebar-text-muted: var(--gray-500);
+    --sidebar-border:  var(--gray-800);
+    --sidebar-logo-bg: var(--gray-900);
+    --header-bg:       var(--gray-900);
+    --header-text:     var(--gray-100);
+    --header-border:   var(--gray-800);
+}
+
+/* ═════════════════════════ SEMANTIC ELEMENT STYLES ═════════════════════
+   Optional convenience classes that bind the tokens to real elements. Mirror of
+   the .text-* / heading conventions used across the kit. */
+.ds-body  { font-family: var(--font-sans); font-size: var(--text-base); line-height: var(--lh-base); color: var(--text-color); font-weight: var(--weight-normal); }
+.ds-h1    { font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: var(--weight-bold);     color: var(--heading-color); letter-spacing: -0.01em; }  /* page heading */
+.ds-h2    { font-size: var(--text-lg);  line-height: var(--lh-lg);  font-weight: var(--weight-semibold); color: var(--heading-color); }  /* card / section title */
+.ds-h3    { font-size: var(--text-base);line-height: var(--lh-base);font-weight: var(--weight-semibold); color: var(--heading-color); }
+.ds-label { font-size: var(--text-sm);  line-height: var(--lh-sm);  font-weight: var(--weight-medium);   color: var(--text-color); }
+.ds-muted { font-size: var(--text-sm);  line-height: var(--lh-sm);  color: var(--text-muted); }
+.ds-section-title { font-size: var(--text-xs); line-height: var(--lh-xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.ds-mono  { font-family: var(--font-mono); font-size: var(--text-xs); }
+.ds-kpi   { font-size: var(--text-2xl); line-height: var(--lh-2xl); font-weight: var(--weight-bold); color: var(--heading-color); }
+.ds-display { font-size: var(--text-5xl); line-height: var(--lh-5xl); font-weight: var(--weight-bold); color: var(--heading-color); }  /* auth hero */

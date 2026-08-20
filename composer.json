@@ -1,0 +1,44 @@
+{
+    "name": "lvntr/api-dock",
+    "description": "Laravel API documentation and AI export tooling built on dedoc/scramble (MIT).",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.3",
+        "dedoc/scramble": "^0.13",
+        "guzzlehttp/guzzle": "^7.8|^8.0",
+        "illuminate/contracts": "^12.0|^13.0",
+        "spatie/laravel-package-tools": "^1.16"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.30",
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^5.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "LvntR\\ApiDock\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "LvntR\\ApiDock\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "LvntR\\ApiDock\\ApiDockServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "sort-packages": true
+    }
+}
