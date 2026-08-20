@@ -13,11 +13,24 @@ The current source tree includes the documentation browser, while its AI and try
 
 ## Installation and publishing
 
-Install the package through Composer:
+The package is not published on Packagist. Point Composer at the repository, then require the package by name:
+
+```json
+{
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/lvntrdev/laravel-api-dock"
+        }
+    ]
+}
+```
 
 ```bash
-composer require lvntr/api-dock
+composer require lvntr/api-dock:^0.1
 ```
+
+Composer reads the tags of that repository, so a constraint resolves to a released tag exactly as it would through Packagist. The Composer package name stays `lvntr/api-dock` even though the repository is named `laravel-api-dock`.
 
 Laravel discovers `LvntR\ApiDock\ApiDockServiceProvider` through the package manifest. Publish only what the application needs:
 
@@ -401,7 +414,7 @@ The checked code differs from the broader implementation plan in these places:
 
 ## Releasing (maintainers)
 
-Versions live in git tags only — `composer.json` carries no `version` key, and Packagist reads the tag list. Commit everything the release should contain first, then run:
+Versions live in git tags only — `composer.json` carries no `version` key, and Composer reads the tag list straight off the repository. Commit everything the release should contain first, then run:
 
 ```bash
 ./release.sh              # interactive version menu (patch / minor / major / custom)
@@ -414,7 +427,7 @@ The script refuses to run on a dirty working tree or a branch behind `origin/mai
 
 Tagging and pushing are confirmed separately; `--no-push` stops after the local tag and `--no-verify` skips the quality gate. When `gh` is installed the script offers to open a GitHub release with generated notes.
 
-The first publish also needs a one-time submit at [packagist.org/packages/submit](https://packagist.org/packages/submit) with the repository URL, plus the GitHub webhook so later tags sync automatically.
+Nothing is submitted anywhere after the push: a consuming application picks the new tag up with `composer update lvntr/api-dock` through its VCS repository entry. Composer caches the tag list per project, so `composer clear-cache` is the fallback when a fresh tag stays invisible.
 
 ## Attribution and license
 

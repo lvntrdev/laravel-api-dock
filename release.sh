@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# release.sh — api-dock sürüm yayınla (git tag → Packagist).
+# release.sh — api-dock sürüm yayınla (git tag).
 #
-# Composer paketlerinde sürüm composer.json'da TUTULMAZ; Packagist sürümü
-# git tag'inden okur. Bu script tag'i üretir, öncesinde kaliteyi ve build
-# çıktısını doğrular.
+# Composer paketlerinde sürüm composer.json'da TUTULMAZ; paket Packagist'te
+# olmadığı için tüketici uygulama depoyu VCS repository olarak ekler ve sürümü
+# doğrudan git tag'inden çözer. Bu script tag'i üretir, öncesinde kaliteyi ve
+# build çıktısını doğrular.
 #
 # Ön koşul: yayınlanacak bütün değişiklikler ZATEN commit'lenmiş olmalı.
 # Script commit atmaz; yalnızca doğrular, tag'ler ve (onayla) push eder.
@@ -83,14 +84,20 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 step "origin ile senkron kontrolü"
-git fetch --quiet origin "$RELEASE_BRANCH" || die "git fetch başarısız."
-BEHIND=$(git rev-list --count "HEAD..origin/$RELEASE_BRANCH")
-AHEAD=$(git rev-list --count "origin/$RELEASE_BRANCH..HEAD")
-[ "$BEHIND" -eq 0 ] || die "Lokal $BEHIND commit geride. Önce 'git pull --rebase'."
-if [ "$AHEAD" -gt 0 ]; then
-  ok "Lokal $AHEAD commit ileride (push'ta gönderilecek)."
+# Uzakta branch henüz yoksa (boş depo, ilk push) karşılaştıracak bir ref yok;
+# fetch başarısız olur ve release burada takılırdı.
+if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
+  git fetch --quiet origin "$RELEASE_BRANCH" || die "git fetch başarısız."
+  BEHIND=$(git rev-list --count "HEAD..origin/$RELEASE_BRANCH")
+  AHEAD=$(git rev-list --count "origin/$RELEASE_BRANCH..HEAD")
+  [ "$BEHIND" -eq 0 ] || die "Lokal $BEHIND commit geride. Önce 'git pull --rebase'."
+  if [ "$AHEAD" -gt 0 ]; then
+    ok "Lokal $AHEAD commit ileride (push'ta gönderilecek)."
+  else
+    ok "origin/$RELEASE_BRANCH ile aynı noktadasın."
+  fi
 else
-  ok "origin/$RELEASE_BRANCH ile aynı noktadasın."
+  ok "origin'de $RELEASE_BRANCH yok — ilk push bu release ile gidecek."
 fi
 
 # --- 2. mevcut sürüm (en son v* tag) ---
@@ -240,8 +247,9 @@ if command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-printf '\n%sPackagist%s\n' "$C_HEAD" "$C_RST"
-printf '  Webhook kuruluysa yeni sürüm birkaç saniyede görünür:\n'
-printf '  https://packagist.org/packages/lvntr/api-dock\n'
-printf '  İlk kez yayınlıyorsan paketi bir kez elle submit et:\n'
-printf '  https://packagist.org/packages/submit  (URL: %s)\n' "$(git remote get-url origin)"
+# Paket Packagist'te DEĞİL: tüketici uygulama composer.json'undaki VCS
+# repositories girdisiyle doğrudan bu depodan çeker; submit edilecek yer yok.
+printf '\n%sTüketici tarafı%s\n' "$C_HEAD" "$C_RST"
+printf '  Depo: %s\n' "$(git remote get-url origin)"
+printf '  Uygulamada: composer update lvntr/api-dock\n'
+printf '  Yeni tag görünmüyorsa: composer clear-cache\n'

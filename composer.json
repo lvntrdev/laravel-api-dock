@@ -10,7 +10,7 @@
         "ai",
         "llms-txt"
     ],
-    "homepage": "https://github.com/lvntr-berth/berth-api-dock",
+    "homepage": "https://github.com/lvntrdev/laravel-api-dock",
     "license": "MIT",
     "type": "library",
     "authors": [
@@ -20,8 +20,8 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/lvntr-berth/berth-api-dock/issues",
-        "source": "https://github.com/lvntr-berth/berth-api-dock"
+        "issues": "https://github.com/lvntrdev/laravel-api-dock/issues",
+        "source": "https://github.com/lvntrdev/laravel-api-dock"
     },
     "require": {
         "php": "^8.3",
