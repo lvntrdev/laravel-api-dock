@@ -576,16 +576,19 @@ final class OutboundRequestGuard
     /**
      * True when the target names this very application.
      *
-     * Sources, in order: the host of the request being served (so a tenant
-     * subdomain the reader is actually on counts), and `app.url`. A subdomain of
-     * either counts too — a multi-tenant deployment answers on all of them from
-     * the same server. Nothing else does: this is deliberately not a wildcard for
-     * "anything nearby", only for the site that served this page.
+     * The match runs in ONE direction only: the target may BE a self host or a
+     * subdomain of one, never its parent. The reverse form once counted
+     * `example.com` as self merely because `docs.example.com` was — one
+     * documented subdomain would have exempted the entire apex, siblings
+     * included.
+     *
+     * What counts as self comes from {@see selfHosts()} — server config, never
+     * the request.
      */
     private static function isSelfHost(string $host): bool
     {
         foreach (self::selfHosts() as $self) {
-            if ($host === $self || str_ends_with($host, '.'.$self) || str_ends_with($self, '.'.$host)) {
+            if ($host === $self || str_ends_with($host, '.'.$self)) {
                 return true;
             }
         }
@@ -594,22 +597,24 @@ final class OutboundRequestGuard
     }
 
     /**
+     * The names that count as this application, from SERVER-SIDE config only.
+     *
+     * Two sources: the host of `app.url`, and the operator-declared
+     * `api-dock.try_it.self_hosts`. The host of the request being served is
+     * deliberately NOT one. It is read from the client-controlled `Host` header,
+     * and a package cannot assume the consuming app enabled `TrustHosts`, so a
+     * forged header would have named any host as self — and a self host skips
+     * the allowlist, the internal-host list AND the post-DNS address gate, which
+     * put cloud metadata one header away.
+     *
+     * A malformed entry is skipped silently rather than denied: this is operator
+     * configuration, not user input, and one typo must not take try-it down.
+     *
      * @return list<string>
      */
     private static function selfHosts(): array
     {
         $hosts = [];
-
-        try {
-            $request = request();
-            $requestHost = strtolower(trim($request->getHost()));
-
-            if ($requestHost !== '') {
-                $hosts[] = $requestHost;
-            }
-        } catch (Throwable) {
-            // No request bound (console, queue): app.url still answers.
-        }
 
         /** @var mixed $appUrl */
         $appUrl = config('app.url');
@@ -620,6 +625,47 @@ final class OutboundRequestGuard
             if (is_string($parsed) && $parsed !== '') {
                 $hosts[] = strtolower(rtrim($parsed, '.'));
             }
+        }
+
+        /** @var mixed $configured */
+        $configured = config('api-dock.try_it.self_hosts', []);
+        $entries = is_array($configured) ? $configured : [];
+
+        foreach ($entries as $entry) {
+            if (! is_string($entry)) {
+                continue;
+            }
+
+            $entry = strtolower(trim(rtrim(trim($entry), '.')));
+
+            // Same hostname shape {@see inspect()} demands of a target, plus the
+            // IP check {@see inspect()} performs BEFORE that pattern — on its own
+            // the pattern accepts a dotted quad (`169.254.169.254` is all
+            // label-legal characters). An entry here bypasses the allowlist, the
+            // internal-host list and the address-class gate at once, so a literal
+            // address must not be spellable into it; a name, resolved and
+            // re-resolved, is the only thing this exemption may name.
+            if (filter_var($entry, FILTER_VALIDATE_IP) !== false) {
+                continue;
+            }
+
+            if (preg_match('/^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$/', $entry) !== 1) {
+                continue;
+            }
+
+            // `FILTER_VALIDATE_IP` only knows the canonical dotted quad, but a
+            // resolver does not: `127.1`, `2130706433` and `0x7f000001` all fail
+            // that check, pass the pattern above, and resolve to loopback. The
+            // last label of a real name starts with a letter and none of those
+            // forms can, so this is what makes the IP rule above hold for the
+            // spellings an operator could otherwise smuggle loopback in with.
+            $labels = explode('.', $entry);
+
+            if (preg_match('/^[a-z]/', (string) end($labels)) !== 1) {
+                continue;
+            }
+
+            $hosts[] = $entry;
         }
 
         return array_values(array_unique(array_filter($hosts)));

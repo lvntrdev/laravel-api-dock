@@ -344,6 +344,149 @@ it('does not let the self host exemption reach an unrelated private address', fu
     Http::assertNothingSent();
 });
 
+it('does not treat a forged host header as this application', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+
+    apiDockSecurityResolvesToItself();
+
+    Http::fake();
+
+    // The forged host has to arrive through the request URI, not through a Host
+    // header: Symfony rebuilds HTTP_HOST from the URI it is handed, so a header
+    // passed to postJson() is overwritten with `localhost` and the spoof never
+    // happens — leaving a green test that proves nothing.
+    $response = $this->postJson('http://169.254.169.254/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://169.254.169.254/latest/meta-data/',
+    ]);
+
+    // Asserted first, because it is what makes the case above a test at all: the
+    // request the pipeline saw really did name the metadata endpoint as its own
+    // host, which is exactly the value the self check must not consult.
+    expect(app('request')->getHost())->toBe('169.254.169.254');
+
+    $response->assertStatus(422);
+
+    expect((string) $response->json('message'))->toContain('allowlist');
+
+    Http::assertNothingSent();
+});
+
+it('does not let a forged host header widen the allowlist to its subdomains', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+
+    Http::fake();
+
+    // The second shape of the same attack: rather than naming the target host
+    // outright, the forged host names its parent and rides the subdomain rule.
+    $response = $this->postJson('http://attacker.test/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://internal.attacker.test/things',
+    ]);
+
+    expect(app('request')->getHost())->toBe('attacker.test');
+
+    $response->assertStatus(422);
+
+    Http::assertNothingSent();
+});
+
+it('denies the parent domain of the application host', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://docs.congress-app.test');
+
+    Http::fake();
+
+    // The self match runs in one direction only. Serving the docs from a
+    // subdomain must not exempt the apex, and with it every sibling hanging off
+    // it — that reverse form was a hole, not a convenience.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://congress-app.test/api/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+});
+
+it('reaches a host the operator declared in the self hosts config', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('api-dock.try_it.self_hosts', ['ikinci-alan.test']);
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    // A deployment answering on a second domain names it in config, server side,
+    // instead of the request naming itself.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://alt.ikinci-alan.test/api/things',
+    ])->assertOk()->assertJsonPath('status', 200);
+
+    Http::assertSent(static fn (ClientRequest $request): bool => $request->url() === 'https://alt.ikinci-alan.test/api/things');
+});
+
+it('ignores a self hosts entry that is not a bare hostname', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+    config()->set('api-dock.try_it.self_hosts', ['', '169.254.169.254', 'not a host']);
+
+    apiDockSecurityResolvesToItself();
+
+    Http::fake();
+
+    // A literal address is the entry that matters here: being self skips the
+    // allowlist, the internal-host list AND the post-DNS address gate at once,
+    // so one line of config would otherwise hand over the metadata endpoint.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://169.254.169.254/latest/meta-data/',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+});
+
+it('ignores a self hosts entry that spells a literal address non canonically', function (string $entry): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+    config()->set('api-dock.try_it.self_hosts', [$entry]);
+
+    Http::fake();
+
+    // FILTER_VALIDATE_IP only recognises the canonical dotted quad, but a
+    // resolver reads every one of these as loopback. If the entry were accepted
+    // as a name, the target below would be self and would skip the address gate.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://'.$entry.'/latest/meta-data/',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+})->with([
+    'dotted short form' => '127.1',
+    'decimal integer' => '2130706433',
+    'hexadecimal' => '0x7f000001',
+]);
+
+it('never lets a self hosts entry be satisfied by a near miss', function (string $host): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('api-dock.try_it.self_hosts', ['ikinci-alan.test']);
+
+    Http::fake();
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://'.$host.'/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+})->with([
+    'prefix collision' => 'evil-ikinci-alan.test',
+    'suffix collision' => 'ikinci-alan.test.attacker.test',
+]);
+
 it('lets a leading dot entry admit the apex it names', function (): void {
     config()->set('api-dock.try_it.allowed_hosts', ['.example.com']);
 

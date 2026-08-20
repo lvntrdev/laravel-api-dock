@@ -82,6 +82,7 @@ These are all keys shipped by `config/api-dock.php`.
 | `snapshot.path` | `storage_path('api-dock/openapi.json')` | Stored OpenAPI snapshot read by `sync` and `diff`. |
 | `try_it.enabled` | `false` | Enables outbound try-it requests and credential-profile endpoints. |
 | `try_it.allowed_hosts` | `[]` | Host allowlist. Empty denies all hosts. A bare entry is exact; a leading-dot entry matches subdomains. |
+| `try_it.self_hosts` | `[]` | Additional domains served by this application. Each entry and its subdomains bypass the foreign-host safety gates; the host from `APP_URL` is already included. |
 | `try_it.timeout` | `10` | Maximum outbound request duration in seconds. Non-positive or non-numeric values fall back to 10. |
 | `try_it.connect_timeout` | `5` | Maximum connection-establishment duration in seconds. Non-positive or non-numeric values fall back to 5. |
 | `try_it.max_response_bytes` | `262144` | Maximum proxied response body, 256 KiB by default. Excess content is truncated and reported with `truncated: true`. |
@@ -345,7 +346,11 @@ php artisan api-dock:export --mcp --output=storage/app/agent-contracts
 
 The try-it proxy is disabled by default. Setting `api-dock.try_it.enabled` to `true` is a deliberate operator decision.
 
-**This application's own host needs no allowlist entry.** The host serving the documentation — and any subdomain of it, so every tenant host in a multi-tenant deployment — is always reachable, and its address is not measured against the private-range gate, so a local or intranet deployment answering on loopback works out of the box. That reach is bounded to that one site: nothing else private becomes addressable. The self host is derived from the incoming request and from `app.url`.
+**This application's own host needs no allowlist entry.** The self host comes from the host in `APP_URL` (`config('app.url')`), and any subdomain of it is covered automatically. If this application answers on any other domain, list that bare hostname in `try_it.self_hosts`. A subdomain of a `self_hosts` entry also counts as self, but its parent domain does not. Entries are lowercased and trimmed, with a trailing dot removed; empty entries, malformed hostnames, leading-dot forms such as `.example.com`, and address literals in any spelling (`127.0.0.1`, `127.1`, `2130706433`, `0x7f000001`) are ignored.
+
+A self host bypasses `try_it.allowed_hosts`, the internal-service host list, and the private-address check after DNS resolution. Use `self_hosts` only for domains of this application — never for a foreign host or an internal service name. Use `allowed_hosts` for foreign hosts.
+
+**Upgrade note:** the proxy no longer trusts the incoming `Host` header when deciding what is self. After upgrading, a deployment whose `APP_URL` does not match the domain it is served on receives a 422 when trying its own API until `APP_URL` is corrected or that served domain is added to `try_it.self_hosts`.
 
 The host allowlist governs **foreign** hosts only, and is deny-by-default: an empty `allowed_hosts` denies every one of them. Bare entries are exact host names. A leading dot, such as `.example.com`, accepts that site and its subdomains — both `example.com` and `api.example.com` — the way a cookie domain does. It never accepts a near miss: `evil-example.com` and `example.com.attacker.test` are denied by both forms.
 

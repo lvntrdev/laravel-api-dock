@@ -29,6 +29,9 @@ return [
         // This application's own host — and any subdomain of it — is always reachable and needs no entry here; trying your own documented API is the point of the panel.
         // This list is only for FOREIGN hosts. Empty denies every one of them. A bare name ('api.example.com') is an exact match; a leading dot ('.example.com') covers that site and its subdomains, the way a cookie domain does.
         'allowed_hosts' => [],
+        // THIS application's own additional domains — nothing else. The host of `app.url` is already treated as self and needs no entry; add a name here only when this app is also served under it (a second domain, a reverse proxy in front of a different `APP_URL`, a tenant domain of yours).
+        // A subdomain of any entry counts as self too. An entry skips the allowlist above, the internal-host list AND the address-class check that follows DNS, so every line is a deliberate decision to trust that name: an internal service name here reopens SSRF on purpose. Bare hostnames only — a leading-dot form is ignored, and so is an address literal in any spelling ('127.0.0.1', '127.1', '2130706433', '0x7f000001'), since the last label of a real name starts with a letter.
+        'self_hosts' => [],
         'allowed_ports' => [80, 443], // Ports the proxy may reach. An allowlisted host usually co-locates internal services, so an open port range would turn one allowed name into a port scanner. Empty or malformed falls back to these two.
         'timeout' => 10, // Maximum outbound request duration in seconds.
         'connect_timeout' => 5, // Seconds allowed for the connection itself, so an unreachable host fails fast instead of holding a worker.
