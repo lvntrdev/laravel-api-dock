@@ -187,6 +187,16 @@ function isOpenApiDocument(payload: unknown): payload is OpenApiDocument {
             :base-url="baseUrl"
             :csrf-token="csrfToken"
           />
+
+          <footer class="app-credit">
+            <span>{{ t('shell.credit') }}</span>
+            <a
+              class="app-credit__link"
+              href="https://lvntr.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+            >{{ t('shell.creditLink') }}</a>
+          </footer>
         </div>
       </main>
     </template>

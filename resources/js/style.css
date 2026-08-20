@@ -119,6 +119,14 @@
 
     /* App chrome */
     --content-bg:             var(--slate-100);       /* page background */
+
+    /* Recessed areas painted ON a card: code insets, header strips, hovers.
+       Their own token because the surface-* scale does NOT flip between themes —
+       a raw --surface-50 background would stay near-white under `.dark` while the
+       text on it turns white. */
+    --inset-bg:               var(--surface-50);
+    --inset-strong-bg:        var(--surface-100);
+    --warning-text:           var(--amber-700);
     --card-bg:                var(--surface-0);
     --sidebar-bg:             var(--surface-900);      /* dark sidebar even in light mode */
     --sidebar-text:           var(--surface-200);
@@ -206,6 +214,9 @@
     --field-bg:        var(--gray-950);
 
     --content-bg:      var(--gray-950);
+    --inset-bg:        var(--gray-800);
+    --inset-strong-bg: var(--gray-700);
+    --warning-text:    var(--amber-500);
     --card-bg:         var(--gray-900);
     --sidebar-bg:      var(--gray-950);
     --sidebar-text-muted: var(--gray-500);
@@ -644,6 +655,31 @@ kbd {
   gap: 26px;
 }
 
+.app-credit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 22px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  text-align: center;
+}
+
+.app-credit__link {
+  color: var(--primary-color);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-credit__link:hover,
+.app-credit__link:focus-visible {
+  text-decoration: underline;
+}
+
 .shell-controls {
   display: flex;
   align-items: center;
@@ -654,7 +690,7 @@ kbd {
 .locale-switch {
   display: flex;
   padding: 3px;
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
 }
@@ -699,7 +735,7 @@ kbd {
 
 .theme-toggle:hover {
   color: var(--primary-600);
-  background: var(--surface-50);
+  background: var(--inset-bg);
 }
 
 .theme-toggle .pi {
@@ -769,7 +805,7 @@ kbd {
   align-self: flex-start;
   gap: 12px;
   padding: 9px 16px 9px 10px;
-  background: var(--surface-50);
+  background: var(--inset-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
 }
@@ -861,7 +897,7 @@ kbd {
 .markdown code {
   padding: 1px 5px;
   border-radius: var(--radius-sm);
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
   font-family: var(--font-mono);
   font-size: 0.92em;
 }
@@ -952,12 +988,12 @@ kbd {
 
 .feature-strip__cell strong {
   overflow-wrap: anywhere;
-  color: var(--surface-800);
+  color: var(--heading-color);
   font: 600 13px/1.5 var(--font-mono);
 }
 
 .feature-strip__cell--warning strong {
-  color: var(--amber-700);
+  color: var(--warning-text);
 }
 
 .operation-tabs-shell {
@@ -970,7 +1006,7 @@ kbd {
   gap: 2px;
   padding: 0 6px;
   overflow-x: auto;
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
   border: 1px solid var(--border-color);
   border-bottom: 0;
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
@@ -999,8 +1035,8 @@ kbd {
 }
 
 .operation-tabs__button:hover {
-  color: var(--surface-800);
-  background: var(--surface-50);
+  color: var(--text-color);
+  background: var(--inset-bg);
 }
 
 .operation-tabs__button:focus-visible {
@@ -1027,7 +1063,7 @@ kbd {
 
 .operation-tab-panels {
   padding: 26px 24px;
-  background: var(--surface-50);
+  background: var(--inset-bg);
   border: 1px solid var(--border-color);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
@@ -1134,7 +1170,7 @@ kbd {
   min-height: 43px;
   padding: 10px 16px;
   color: var(--text-muted);
-  background: var(--surface-50);
+  background: var(--inset-bg);
   border-bottom: 1px solid var(--border-color);
   font: 700 10px/1 var(--font-sans);
   letter-spacing: 0.12em;
@@ -1142,7 +1178,7 @@ kbd {
 }
 
 .schema-card__bar code {
-  color: var(--surface-700);
+  color: var(--text-color);
   font-size: 12px;
   letter-spacing: 0;
   text-transform: none;
@@ -1202,13 +1238,13 @@ kbd {
 
 .schema-node__format,
 .schema-node__ref {
-  color: var(--surface-400);
-  background: var(--surface-100);
+  color: var(--text-muted);
+  background: var(--inset-strong-bg);
 }
 
 .schema-node__nullable {
   color: var(--violet-500);
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
 }
 
 .schema-node__required {
@@ -1247,7 +1283,7 @@ kbd {
 .schema-node__enum code {
   padding: 3px 5px;
   color: var(--text-muted);
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xs);
   font-size: 9px;
@@ -1966,7 +2002,7 @@ kbd {
 
 .try-it-control--path input {
   padding-inline: 12px;
-  background: var(--surface-50);
+  background: var(--inset-bg);
   font-weight: 400;
 }
 
@@ -2085,7 +2121,7 @@ kbd {
 
 .try-it-profile-add:hover {
   border-color: var(--primary-500);
-  background: var(--surface-50);
+  background: var(--inset-bg);
 }
 
 .try-it-profile-add > i {
@@ -2193,8 +2229,8 @@ kbd {
   margin: 8px 0 0;
   padding: 14px;
   overflow-x: auto;
-  color: var(--surface-800);
-  background: var(--surface-50);
+  color: var(--text-color);
+  background: var(--inset-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   font: 12px/1.7 var(--font-mono);
@@ -2206,9 +2242,76 @@ kbd {
   margin-top: 16px;
 }
 
+.proxy-response__result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.proxy-response__result-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .proxy-response__json,
 .proxy-response__result > pre {
   margin-top: 8px;
+}
+
+.body-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgb(0 0 0 / 55%);
+}
+
+.body-modal__panel {
+  display: flex;
+  width: min(1080px, 100%);
+  max-height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+}
+
+.body-modal__header {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.body-modal__content {
+  min-height: 0;
+  padding: 18px 20px;
+  overflow: auto;
+}
+
+.body-modal__content > pre {
+  margin: 0;
+  padding: 16px 14px;
+  color: var(--surface-200);
+  background: var(--surface-900);
+  border-radius: var(--radius-lg);
+  font: 12px/1.75 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body-modal__notice {
+  margin: 0;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border-color);
 }
 
 .proxy-response__result > pre {
@@ -2225,7 +2328,7 @@ kbd {
 .response-headers {
   margin-top: 8px;
   padding: 10px 12px;
-  background: var(--surface-50);
+  background: var(--inset-bg);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
 }
@@ -2294,7 +2397,7 @@ kbd {
 }
 
 .ai-examples summary:hover {
-  background: var(--surface-50);
+  background: var(--inset-bg);
 }
 
 .ai-examples summary::-webkit-details-marker {
@@ -2351,8 +2454,8 @@ kbd {
   gap: 8px;
   min-height: 38px;
   padding-inline: 16px;
-  color: var(--surface-700);
-  background: var(--surface-0);
+  color: var(--text-color);
+  background: var(--card-bg);
   border-color: var(--field-border);
   font-size: 12.5px;
   font-weight: 500;
@@ -2361,7 +2464,7 @@ kbd {
 
 .artifact-actions .button:hover,
 .panel-toolbar .copy-button:hover {
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
 }
 
 .artifact-actions .pi,
@@ -2413,7 +2516,7 @@ kbd {
 }
 
 .diff-group > header {
-  background: var(--surface-50);
+  background: var(--inset-bg);
 }
 
 .diff-group h3 {
@@ -2429,7 +2532,7 @@ kbd {
   align-items: center;
   justify-content: center;
   padding: 0 7px;
-  background: var(--surface-100);
+  background: var(--inset-strong-bg);
   border-radius: var(--radius-full);
 }
 

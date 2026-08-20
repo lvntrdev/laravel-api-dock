@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import JsonTree from '@/components/JsonTree.vue'
 import { openSettings } from '@/lib/appView'
@@ -49,6 +49,7 @@ const BODYLESS_METHODS = new Set(['GET', 'HEAD'])
 // there, so offering it here would only produce a 422 from the proxy.
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']
 const FALLBACK_METHOD = 'GET'
+const MODAL_FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 const props = withDefaults(
   defineProps<{
@@ -102,7 +103,11 @@ const sending = ref(false)
 const requestError = ref('')
 const responseResult = ref<ProxyResult>()
 const elapsedMs = ref<number>()
-const copied = ref<'curl' | ''>('')
+const copied = ref<'curl' | 'body' | ''>('')
+const bodyExpanded = ref(false)
+const closeModalButton = ref<HTMLButtonElement>()
+const expandButton = ref<HTMLButtonElement>()
+const modalPanel = ref<HTMLElement>()
 
 // Either endpoint answering 403 means the same thing: try-it is switched off for this
 // reader, so the panel refuses rather than offering a send that cannot land.
@@ -277,6 +282,84 @@ async function copyCurl(): Promise<void> {
   await navigator.clipboard.writeText(curlSample.value)
   copied.value = 'curl'
 }
+
+// The clipboard gets the whole body, not the slice the DOM renders: the character limit
+// exists to keep the page responsive, and silently copying a cut-off payload would be worse
+// than the scroll it saves.
+async function copyResponseBody(): Promise<void> {
+  await navigator.clipboard.writeText(renderedBody.value)
+  copied.value = 'body'
+}
+
+function closeBodyModal(): void {
+  bodyExpanded.value = false
+}
+
+// The overlay hides the page behind it, so a Tab that walked out of the dialog would move
+// focus to a control nobody can see. `aria-modal` only tells assistive technology that the
+// rest of the page is inert; keeping the tab ring inside is this handler's job.
+function handleModalKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    closeBodyModal()
+    return
+  }
+
+  if (event.key !== 'Tab' || !modalPanel.value) {
+    return
+  }
+
+  const focusable = Array.from(
+    modalPanel.value.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR),
+  ).filter((element) => element.offsetParent !== null || element === document.activeElement)
+
+  if (focusable.length === 0) {
+    event.preventDefault()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  const active = document.activeElement
+  const outside = !(active instanceof HTMLElement) || !modalPanel.value.contains(active)
+
+  if (event.shiftKey && (outside || active === first)) {
+    event.preventDefault()
+    last.focus()
+    return
+  }
+
+  if (!event.shiftKey && (outside || active === last)) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+watch(bodyExpanded, async (open) => {
+  if (open) {
+    window.addEventListener('keydown', handleModalKeydown)
+    // Focus moves into the modal so the keyboard reader lands on the control that closes it
+    // instead of continuing through the page behind the overlay.
+    await nextTick()
+    closeModalButton.value?.focus()
+    return
+  }
+
+  window.removeEventListener('keydown', handleModalKeydown)
+  // Focus returns to the control that opened the dialog. The button can be gone — a new
+  // response closes the modal and re-renders this area — so it is only refocused while it
+  // is still on the page.
+  await nextTick()
+
+  if (expandButton.value?.isConnected) {
+    expandButton.value.focus()
+  }
+})
+
+// A fresh response replaces what the modal is showing, so leaving it open would put the
+// previous run's body on screen under the new run's status line.
+watch(responseResult, closeBodyModal)
+
+onUnmounted(() => window.removeEventListener('keydown', handleModalKeydown))
 
 function updateParameter(parameter: EditableParameter, event: Event): void {
   parameter.value = (event.target as HTMLInputElement).value
@@ -497,13 +580,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
             <pre>{{ requestPayload }}</pre>
           </div>
           <div class="proxy-response__result">
-            <span class="panel-label">{{ t('tryIt.responseBody') }}</span>
+            <div class="proxy-response__result-header">
+              <span class="panel-label">{{ t('tryIt.responseBody') }}</span>
+              <div class="proxy-response__result-actions">
+                <button type="button" class="code-copy-button" :title="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" :aria-label="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" data-testid="copy-response-body" @click="copyResponseBody">
+                  <i :class="copied === 'body' ? 'pi pi-check' : 'pi pi-copy'" />
+                </button>
+                <button type="button" class="code-copy-button" :title="t('tryIt.expandResponseBody')" :aria-label="t('tryIt.expandResponseBody')" ref="expandButton" data-testid="expand-response-body" @click="bodyExpanded = true">
+                  <i class="pi pi-window-maximize" />
+                </button>
+              </div>
+            </div>
             <JsonTree v-if="visibleBodyJson.valid" class="proxy-response__json" data-testid="response-body" :value="visibleBodyJson.value" />
             <pre v-else data-testid="response-body">{{ visibleBody }}</pre>
             <p v-if="bodyWasDomTruncated" class="truncation-notice">{{ t('tryIt.responseBodyTruncated', { limit: RESPONSE_BODY_LIMIT }) }}</p>
           </div>
         </div>
       </div>
+
+      <Teleport to="body">
+        <div v-if="bodyExpanded" class="body-modal" data-testid="response-body-modal" @click.self="closeBodyModal">
+          <div ref="modalPanel" class="body-modal__panel" role="dialog" aria-modal="true" :aria-label="t('tryIt.responseBody')">
+            <header class="body-modal__header">
+              <span class="panel-label">{{ t('tryIt.responseBody') }}</span>
+              <div class="proxy-response__result-actions">
+                <button type="button" class="code-copy-button" :title="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" :aria-label="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" data-testid="copy-response-body-modal" @click="copyResponseBody">
+                  <i :class="copied === 'body' ? 'pi pi-check' : 'pi pi-copy'" />
+                </button>
+                <button type="button" class="code-copy-button" :title="t('common.close')" :aria-label="t('common.close')" ref="closeModalButton" data-testid="close-response-body-modal" @click="closeBodyModal">
+                  <i class="pi pi-times" />
+                </button>
+              </div>
+            </header>
+            <div class="body-modal__content">
+              <JsonTree v-if="visibleBodyJson.valid" data-testid="response-body-expanded" :value="visibleBodyJson.value" />
+              <pre v-else data-testid="response-body-expanded">{{ visibleBody }}</pre>
+            </div>
+            <p v-if="bodyWasDomTruncated" class="truncation-notice body-modal__notice">{{ t('tryIt.responseBodyTruncated', { limit: RESPONSE_BODY_LIMIT }) }}</p>
+          </div>
+        </div>
+      </Teleport>
     </template>
   </section>
 </template>
