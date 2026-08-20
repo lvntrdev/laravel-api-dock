@@ -85,8 +85,15 @@ fi
 
 step "origin ile senkron kontrolü"
 # Uzakta branch henüz yoksa (boş depo, ilk push) karşılaştıracak bir ref yok;
-# fetch başarısız olur ve release burada takılırdı.
-if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
+# fetch başarısız olur ve release burada takılırdı. --exit-code eşleşme yoksa 2
+# döndürür; ağ/kimlik/yanlış origin hataları başka bir kod döndürür ve bunlar
+# "branch yok" sayılamaz — öyle sayılsa doğrulanmamış bir HEAD etiketlenebilirdi.
+LS_REMOTE_STATUS=0
+git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1 || LS_REMOTE_STATUS=$?
+if [ "$LS_REMOTE_STATUS" -ne 0 ] && [ "$LS_REMOTE_STATUS" -ne 2 ]; then
+  die "origin sorgulanamadı (git ls-remote çıkış kodu $LS_REMOTE_STATUS). Ağ/erişim sorununu çöz, sonra tekrar dene."
+fi
+if [ "$LS_REMOTE_STATUS" -eq 0 ]; then
   git fetch --quiet origin "$RELEASE_BRANCH" || die "git fetch başarısız."
   BEHIND=$(git rev-list --count "HEAD..origin/$RELEASE_BRANCH")
   AHEAD=$(git rev-list --count "origin/$RELEASE_BRANCH..HEAD")
