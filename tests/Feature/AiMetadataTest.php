@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use LvntR\ApiDock\ApiDockServiceProvider;
 use LvntR\ApiDock\Export\LlmsTxtExporter;
 use LvntR\ApiDock\Export\McpToolExporter;
 
@@ -116,8 +117,10 @@ it('adds deterministic package metadata to the document', function (): void {
     $first->assertOk();
     $second->assertOk();
 
+    // The version comes from Composer's installed metadata, so it differs between a
+    // tagged install and this checkout; what the document owes is the SAME value twice.
     expect($first->json('x-api-dock'))
-        ->toBe(['version' => 'dev'])
+        ->toBe(['version' => ApiDockServiceProvider::version()])
         ->and($second->json('x-api-dock'))
         ->toBe($first->json('x-api-dock'));
 });
