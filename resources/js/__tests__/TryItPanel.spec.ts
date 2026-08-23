@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import TryItPanel from '@/components/TryItPanel.vue'
 import { resetProfiles } from '@/lib/tryItProfiles'
 import {
+  operationInputs,
   plainBaseUrl,
   resetTryItSession,
   serverVariables,
@@ -257,13 +258,117 @@ describe('TryItPanel', () => {
     expect(JSON.parse(String(sendCall?.[1]?.body))).not.toHaveProperty('profile')
     wrapper.unmount()
   })
+
+  it('remembers the parameter values and body a reader typed for this operation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const first = mountPanel()
+    await flushPromises()
+
+    await first.get('[data-testid="parameter-path-id"]').setValue('91')
+    await first.get('[data-testid="body-editor"]').setValue('{"active":false}')
+    first.unmount()
+
+    // A remount is what leaving the endpoint and coming back does — the detail view
+    // keys the panel on the operation — and it is also what a page reload does.
+    const second = mountPanel()
+    await flushPromises()
+
+    expect(second.get<HTMLInputElement>('[data-testid="parameter-path-id"]').element.value).toBe('91')
+    expect(second.get<HTMLTextAreaElement>('[data-testid="body-editor"]').element.value)
+      .toBe('{"active":false}')
+    expect(operationInputs.value[operation.key]?.parameters['path:id']).toBe('91')
+    second.unmount()
+  })
+
+  it('keeps one operation form out of another operation form', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="parameter-path-id"]').setValue('91')
+    wrapper.unmount()
+
+    const other = mountPanel(document, {
+      ...operation,
+      key: 'post:/users/{id}:other',
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+    })
+    await flushPromises()
+
+    expect(other.get<HTMLInputElement>('[data-testid="parameter-path-id"]').element.value).toBe('')
+    other.unmount()
+  })
+
+  it('prefills the body from a referenced schema when the spec ships no example', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const wrapper = mountPanel(schemaDocument, referencedBodyOperation())
+    await flushPromises()
+
+    expect(JSON.parse(wrapper.get<HTMLTextAreaElement>('[data-testid="body-editor"]').element.value))
+      .toEqual({ phone: '', password: '' })
+    wrapper.unmount()
+  })
+
+  it('prefers a hand-written AI example over the generated skeleton', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const withExample = referencedBodyOperation()
+    withExample.operation['x-ai-examples'] = [
+      { name: 'Unlock', request: { phone: '+905551112233' }, response: {} },
+    ]
+    const wrapper = mountPanel(schemaDocument, withExample)
+    await flushPromises()
+
+    expect(JSON.parse(wrapper.get<HTMLTextAreaElement>('[data-testid="body-editor"]').element.value))
+      .toEqual({ phone: '+905551112233' })
+    wrapper.unmount()
+  })
 })
 
-function mountPanel(panelDocument: OpenApiDocument = document) {
+const schemaDocument: OpenApiDocument = {
+  openapi: '3.1.0',
+  paths: {},
+  components: {
+    schemas: {
+      ParticipantUnlockRequest: {
+        type: 'object',
+        properties: {
+          phone: { type: 'string', maxLength: 50 },
+          password: { type: ['string', 'null'], maxLength: 255 },
+        },
+        required: ['phone'],
+      },
+    },
+  },
+}
+
+function referencedBodyOperation(): OperationEntry {
+  return {
+    key: 'post:/participants/unlock',
+    method: 'post',
+    path: '/participants/unlock',
+    operation: {
+      operationId: 'unlockParticipant',
+      requestBody: {
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/ParticipantUnlockRequest' },
+          },
+        },
+      },
+      responses: { '200': { description: 'OK' } },
+    },
+    parameters: [],
+  }
+}
+
+function mountPanel(
+  panelDocument: OpenApiDocument = document,
+  panelOperation: OperationEntry = operation,
+) {
   return mount(TryItPanel, {
     props: {
       document: panelDocument,
-      operation,
+      operation: panelOperation,
       baseUrl: '/api-dock',
       csrfToken: 'csrf-token',
     },

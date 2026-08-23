@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import JsonTree from '@/components/JsonTree.vue'
 import { openSettings } from '@/lib/appView'
 import { t } from '@/lib/i18n'
-import { isReference, resolvePointer } from '@/lib/schema'
+import { isReference, resolvePointer, resolveSchema, sampleFromSchema } from '@/lib/schema'
 import {
   loadProfiles,
   loadingProfiles,
@@ -19,9 +19,11 @@ import {
   selectedProfileId as storedSelectedProfileId,
   selectedServer as storedSelectedServer,
   serverVariables,
+  setOperationInputs,
   setPlainBaseUrl,
   setSelectedProfileId,
   setServerVariables,
+  storedOperationInputs,
 } from '@/lib/tryItSession'
 import {
   buildCurlSample,
@@ -73,9 +75,18 @@ interface ProxyResult {
   url: string
 }
 
+// What this reader last typed into THIS operation's form. Read once, at setup: the
+// panel is remounted per operation (the detail view keys it on the operation), so
+// there is no second operation to reload for.
+const remembered = storedOperationInputs(props.operation.key)
 const method = ref(initialMethod())
 const path = ref(props.operation.path)
-const parameters = ref<EditableParameter[]>(operationParameters(props.document, props.operation))
+const parameters = ref<EditableParameter[]>(
+  operationParameters(props.document, props.operation).map((parameter) => ({
+    ...parameter,
+    value: remembered.parameters[parameterMemoryKey(parameter)] ?? parameter.value,
+  })),
+)
 // The origin the page was opened on leads the list: on a multi-tenant host the
 // spec names the apex, but the reader is demonstrably on a tenant subdomain.
 const servers = withCurrentOrigin(
@@ -93,7 +104,8 @@ const plainBaseUrl = computed({
   get: () => storedPlainBaseUrl.value,
   set: setPlainBaseUrl,
 })
-const bodyText = ref(initialBodyText())
+// A remembered body outranks the generated one: it is what the reader last sent.
+const bodyText = ref(remembered.body !== '' ? remembered.body : initialBodyText())
 const selectedProfileId = computed({
   get: () => storedSelectedProfileId.value,
   set: setSelectedProfileId,
@@ -210,6 +222,18 @@ watch(selectedProfile, (profile, previous) => {
     plainBaseUrl.value = profile.base_url
   }
 })
+
+// Remember the composed request as it is typed, so leaving the endpoint and coming
+// back — or reloading the page — does not hand the reader an empty form again.
+// `deep` because the values live inside the parameter objects, not in the array.
+watch([parameters, bodyText], () => {
+  setOperationInputs(props.operation.key, {
+    parameters: Object.fromEntries(
+      parameters.value.map((parameter) => [parameterMemoryKey(parameter), parameter.value]),
+    ),
+    body: bodyText.value,
+  })
+}, { deep: true })
 
 // One fetch per mount and no polling: the list is shared module state, so what the
 // settings panel creates is already visible here.
@@ -453,6 +477,14 @@ function prettyResponseBody(body: string): string {
   }
 }
 
+/**
+ * Two parameters may share a name across locations — a `page` query and a `page`
+ * header are different inputs — so the remembered value is keyed by both.
+ */
+function parameterMemoryKey(parameter: { in: string; name: string }): string {
+  return `${parameter.in}:${parameter.name}`
+}
+
 function initialMethod(): string {
   const candidate = props.operation.method.toUpperCase()
 
@@ -471,10 +503,28 @@ function initialBodyText(): string {
     : undefined
   const media = requestBody?.content?.['application/json']
     ?? Object.values(requestBody?.content ?? {})[0]
-  const schema = media?.schema && !isReference(media.schema) ? media.schema : undefined
-  const example = media?.example ?? schema?.example ?? schema?.default ?? {}
+  // Scramble writes the body schema as a `$ref` and never fills the media type's own
+  // `example`, so the declared example almost always lives one hop away.
+  const schema = resolveSchema(media?.schema, props.document)
+  const declared = media?.example ?? schema?.example ?? schema?.default
 
-  return JSON.stringify(example, null, 2) ?? '{}'
+  if (declared !== undefined) {
+    return JSON.stringify(declared, null, 2) ?? '{}'
+  }
+
+  // Hand-written AI examples carry a real payload; they beat a generated skeleton.
+  const aiRequest = props.operation.operation['x-ai-examples']?.[0]?.request
+
+  // Same reasoning as the sample below: an array or scalar example is a body too.
+  if (aiRequest !== undefined && aiRequest !== null) {
+    return JSON.stringify(aiRequest, null, 2) ?? '{}'
+  }
+
+  // A top-level array or scalar is a valid JSON body: taking only objects would
+  // hand the reader `{}` for a schema that generated the right shape.
+  const sample = schema ? sampleFromSchema(media?.schema, props.document) : undefined
+
+  return JSON.stringify(sample ?? {}, null, 2) ?? '{}'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

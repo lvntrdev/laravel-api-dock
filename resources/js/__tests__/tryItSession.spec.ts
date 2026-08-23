@@ -89,6 +89,7 @@ describe('try-it session persistence', () => {
       selectedServer: 'https://{tenant}.example.com/api',
       serverVariables: { tenant: 'acme' },
       plainBaseUrl: 'https://staging.example.com/api',
+      operations: {},
     })
     expect(serialized).not.toContain(rawCredential)
     expect(serialized).not.toContain(credentialHeaderValue)
