@@ -41,7 +41,7 @@ final class ApiDockTransformer
      */
     public function metadata(): array
     {
-        $metadata = ['version' => $this->packageVersion()];
+        $metadata = ['version' => ApiDockServiceProvider::version()];
 
         // Off by default on purpose: Task 3's snapshot needs two consecutive
         // generations of an unchanged API to be byte-identical.
@@ -50,25 +50,5 @@ final class ApiDockTransformer
         }
 
         return $metadata;
-    }
-
-    private function packageVersion(): string
-    {
-        try {
-            $contents = file_get_contents(dirname(__DIR__, 2).'/composer.json');
-
-            if ($contents === false) {
-                return ApiDockServiceProvider::VERSION;
-            }
-
-            $composer = json_decode($contents, true);
-            $version = is_array($composer) ? ($composer['version'] ?? null) : null;
-
-            return is_string($version) && $version !== ''
-                ? $version
-                : ApiDockServiceProvider::VERSION;
-        } catch (Throwable) {
-            return ApiDockServiceProvider::VERSION;
-        }
     }
 }

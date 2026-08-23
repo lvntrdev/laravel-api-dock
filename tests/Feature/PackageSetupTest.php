@@ -50,3 +50,15 @@ it('hides the spec route when API Dock is disabled', function (): void {
 
     $this->getJson('/api-dock/spec')->assertNotFound();
 });
+
+it('renders the installed package version on the docs page', function (): void {
+    $version = ApiDockServiceProvider::version();
+
+    expect($version)->toBeString()->not->toBe('');
+
+    // The panel reads the version off its own mount element; without the
+    // attribute the footer silently falls back to `dev` on every install.
+    $this->get('/api-dock')
+        ->assertOk()
+        ->assertSee('data-version="'.e($version).'"', false);
+});

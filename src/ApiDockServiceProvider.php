@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace LvntR\ApiDock;
 
+use Composer\InstalledVersions;
 use Dedoc\Scramble\Scramble;
 use LvntR\ApiDock\Console\AgentGuideCommand;
 use LvntR\ApiDock\Console\DiffCommand;
@@ -16,7 +17,39 @@ use Spatie\LaravelPackageTools\PackageServiceProvider;
 
 final class ApiDockServiceProvider extends PackageServiceProvider
 {
+    /**
+     * Fallback when the installed version cannot be resolved.
+     *
+     * The real version is a git tag: Composer packages do not carry a `version`
+     * key, and this package is consumed through a VCS repository entry, so the
+     * only authority at runtime is Composer's installed metadata.
+     */
     public const VERSION = 'dev';
+
+    /**
+     * The installed package version, as Composer resolved it.
+     *
+     * Returns the git tag without its `v` prefix for a tagged install
+     * (`0.0.3`), the branch alias for a branch install (`dev-main`), and
+     * `self::VERSION` when the package is not a Composer install at all — a
+     * local checkout running its own test suite, for instance.
+     */
+    public static function version(): string
+    {
+        if (! class_exists(InstalledVersions::class) || ! InstalledVersions::isInstalled('lvntr/api-dock')) {
+            return self::VERSION;
+        }
+
+        $version = InstalledVersions::getPrettyVersion('lvntr/api-dock');
+
+        // A root package with no tag on HEAD reports `1.0.0+no-version-set`,
+        // which is a placeholder rather than a version anyone shipped.
+        if (! is_string($version) || $version === '' || str_contains($version, 'no-version-set')) {
+            return self::VERSION;
+        }
+
+        return ltrim($version, 'v');
+    }
 
     public function configurePackage(Package $package): void
     {

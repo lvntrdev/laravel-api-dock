@@ -26,5 +26,7 @@ if (mountElement) {
   setLocale(resolveInitialLocale(mountElement.dataset.locale))
   setTheme(resolveInitialTheme(mountElement.dataset.theme))
 
-  createApp(App, { specUrl, baseUrl, csrfToken }).mount(mountElement)
+  const version = mountElement.dataset.version || 'dev'
+
+  createApp(App, { specUrl, baseUrl, csrfToken, version }).mount(mountElement)
 }

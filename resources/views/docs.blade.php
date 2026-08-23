@@ -19,6 +19,7 @@
         data-csrf-token="{{ csrf_token() }}"
         data-locale="{{ $locale }}"
         data-theme="{{ $theme }}"
+        data-version="{{ \LvntR\ApiDock\ApiDockServiceProvider::version() }}"
     ></div>
     <script defer src="{{ \LvntR\ApiDock\ApiDockServiceProvider::assetUrl('api-dock.js') }}"></script>
 </body>

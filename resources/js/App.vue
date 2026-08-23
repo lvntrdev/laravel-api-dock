@@ -19,6 +19,7 @@ const props = defineProps<{
   specUrl: string
   baseUrl: string
   csrfToken: string
+  version: string
 }>()
 
 const document = ref<OpenApiDocument>()
@@ -31,6 +32,11 @@ const operationCount = computed(() =>
 )
 const selectedOperation = computed(() =>
   document.value ? findOperation(document.value, selectedKey.value) : undefined,
+)
+// A tagged install reports `0.0.3`, a branch install `dev-main`: the `v`
+// prefix belongs only on the former.
+const versionLabel = computed(() =>
+  /^\d/.test(props.version) ? `v${props.version}` : props.version,
 )
 const themeToggleLabel = computed(() =>
   theme.value === 'dark' ? t('shell.lightTheme') : t('shell.darkTheme'),
@@ -189,6 +195,7 @@ function isOpenApiDocument(payload: unknown): payload is OpenApiDocument {
           />
 
           <footer class="app-credit">
+            <span class="app-credit__version" :title="t('shell.versionTitle')">{{ versionLabel }}</span>
             <span>{{ t('shell.credit') }}</span>
             <a
               class="app-credit__link"
