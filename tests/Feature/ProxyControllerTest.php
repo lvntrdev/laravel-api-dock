@@ -325,9 +325,8 @@ it('strips hop-by-hop and identity headers in both directions', function (): voi
 
 it('keeps a stored credential out of the store read path and out of every response', function (): void {
     $store = app(AuthProfileStore::class);
-    $sessionKey = Session::getId();
 
-    $profile = $store->put($sessionKey, [
+    $profile = $store->put([
         'label' => 'Dummy profile',
         'base_url' => 'https://api.example.com',
         'scheme' => 'bearer',
@@ -336,9 +335,9 @@ it('keeps a stored credential out of the store read path and out of every respon
 
     expect($profile)->not->toHaveKey('credential')
         ->and($profile['credential_hint'])->toBe('****DDDD')
-        ->and($store->find($sessionKey, $profile['id']))->not->toHaveKey('credential')
-        ->and($store->all($sessionKey)[0])->not->toHaveKey('credential')
-        ->and($store->revealCredentialForOutboundRequest($sessionKey, $profile['id']))->toBe(DUMMY_CREDENTIAL);
+        ->and($store->find($profile['id']))->not->toHaveKey('credential')
+        ->and($store->all()[0])->not->toHaveKey('credential')
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBe(DUMMY_CREDENTIAL);
 
     Http::fake(['*' => Http::response('{"ok":true}', 200)]);
 
@@ -363,7 +362,7 @@ it('keeps a stored credential out of a refused request as well', function (): vo
     resolvesTo(['169.254.169.254']);
 
     $store = app(AuthProfileStore::class);
-    $profile = $store->put(Session::getId(), [
+    $profile = $store->put([
         'scheme' => 'bearer',
         'credential' => DUMMY_CREDENTIAL,
     ]);
@@ -384,7 +383,7 @@ it('keeps a stored credential out of a refused request as well', function (): vo
 
 it('replaces a client supplied authorization header with the stored profile credential', function (): void {
     $store = app(AuthProfileStore::class);
-    $profile = $store->put(Session::getId(), [
+    $profile = $store->put([
         'scheme' => 'bearer',
         'credential' => DUMMY_CREDENTIAL,
     ]);

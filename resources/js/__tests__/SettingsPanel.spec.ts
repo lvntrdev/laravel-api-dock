@@ -168,6 +168,18 @@ describe('SettingsPanel', () => {
     expect(profiles.value.map((profile) => profile.id)).toEqual([fresh.id])
   })
 
+  it('keeps a profile whose server variables arrive as an empty JSON array', async () => {
+    // PHP encodes an empty map as `[]`. Dropping such a profile emptied the list on
+    // every load, which read as credentials that refused to persist.
+    const legacy = { ...storedProfile({ id: 'profile-legacy' }), server_variables: [] }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [legacy] })))
+
+    await loadProfiles({ baseUrl: '/api-dock', csrfToken: 'csrf-token' })
+
+    expect(profiles.value.map((profile) => profile.id)).toEqual(['profile-legacy'])
+    expect(profiles.value[0]?.server_variables).toEqual({})
+  })
+
   it('shows the request target the selected profile filled in', async () => {
     const profile = storedProfile({
       id: 'profile-1',

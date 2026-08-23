@@ -60,7 +60,7 @@ export async function loadProfiles(target: ProfileEndpoint): Promise<void> {
     }
 
     profiles.value = Array.isArray(payload.profiles)
-      ? payload.profiles.filter(isTryItProfile)
+      ? payload.profiles.map(withServerVariableMap).filter(isTryItProfile)
       : []
     discardMissingProfile(profiles.value.map((profile) => profile.id))
   } catch {
@@ -110,14 +110,20 @@ export async function createProfile(
       return null
     }
 
-    if (!isTryItProfile(payload.profile)) {
+    const created = withServerVariableMap(payload.profile)
+
+    if (!isTryItProfile(created)) {
+      // A profile the server stored but the client cannot read is worse than a
+      // failed write: the panel would look empty while the credential is live.
+      profileError.value = t('tryIt.profileCreateError')
+
       return null
     }
 
-    profiles.value = [...profiles.value, payload.profile]
-    setSelectedProfileId(payload.profile.id)
+    profiles.value = [...profiles.value, created]
+    setSelectedProfileId(created.id)
 
-    return payload.profile
+    return created
   } catch {
     profileError.value = t('tryIt.profileCreateError')
 
@@ -157,6 +163,21 @@ export function resetProfiles(): void {
   loadingProfiles.value = false
   profileError.value = ''
   profileDenied.value = ''
+}
+
+/**
+ * PHP encodes an empty map as a JSON array, so a profile with no server variables
+ * used to arrive as `server_variables: []`. The guard below reads that field as an
+ * object and dropped the whole profile over it — silently emptying the list on
+ * every load, which looked like credentials that would not persist. The server
+ * now sends an object; this keeps an older one usable.
+ */
+function withServerVariableMap(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.server_variables)) {
+    return value
+  }
+
+  return { ...value, server_variables: {} }
 }
 
 export function isTryItProfile(value: unknown): value is StoredTryItProfile {

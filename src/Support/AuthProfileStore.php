@@ -4,51 +4,54 @@ declare(strict_types=1);
 
 namespace LvntR\ApiDock\Support;
 
-use Illuminate\Contracts\Cache\LockProvider;
-use Illuminate\Contracts\Cache\LockTimeoutException;
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Contracts\Encryption\Encrypter;
+use Illuminate\Support\Facades\Session;
 use InvalidArgumentException;
 
 /**
- * Short-lived, per-session try-it credentials.
+ * Try-it credentials, held for exactly as long as the session that created them.
+ *
+ * The profiles live IN the session payload, not in the cache beside it: a reader
+ * keeps a profile until they log out (or their session lapses), and nothing else
+ * has to be kept in sync with the session's own lifetime. There is no separate
+ * expiry to configure, and logging out — which invalidates the session — takes
+ * every stored credential with it.
  *
  * The credential is encrypted with the application encrypter before it reaches the
- * cache, and it is only ever handed back in plaintext through the one method whose
- * name says so. Every other read path returns a masked hint, so a credential cannot
- * reach a response, a log line or a debug dump by accident.
+ * session driver, and it is only ever handed back in plaintext through the one
+ * method whose name says so. Every other read path returns a masked hint, so a
+ * credential cannot reach a response, a log line or a debug dump by accident.
+ *
+ * The session is read and written through the facade rather than an injected
+ * instance on purpose: the store must always act on the session THIS request
+ * started, and a long-lived worker that reuses a resolved instance would
+ * otherwise carry another request's session into this one.
  */
 final readonly class AuthProfileStore
 {
     /** @var list<string> */
     public const SCHEMES = ['bearer', 'basic', 'header'];
 
-    private const KEY_PREFIX = 'api-dock:try-it:profiles:';
+    private const SESSION_KEY = 'api-dock.try-it.profiles';
 
     /**
      * Server variables are plain profile data, so nothing else bounds them: they
      * carry no credential and pass through no other guard. Without a ceiling on
-     * the entry count and on each name and value, this one field could inflate a
-     * session bucket that every read unserializes in full.
+     * the entry count and on each name and value, this one field could inflate the
+     * session payload that every request unserializes in full.
      */
     public const MAX_SERVER_VARIABLES = 20;
 
     public const MAX_SERVER_VARIABLE_LENGTH = 255;
 
-    /** Also the fallback for a non-positive or non-numeric configured ttl. */
-    private const DEFAULT_TTL = 3600;
-
-    public function __construct(
-        private CacheRepository $cache,
-        private Encrypter $encrypter,
-    ) {}
+    public function __construct(private Encrypter $encrypter) {}
 
     /**
      * @param  array{label?: string, base_url?: string, scheme?: string, credential?: string, credential_header?: string, server_variables?: array<string, string>}  $attributes
      * @return array{id: string, label: string, base_url: string, server_variables: array<string, string>, scheme: string, credential_header: string|null, credential_hint: string}
      */
-    public function put(string $sessionKey, array $attributes): array
+    public function put(array $attributes): array
     {
         $scheme = strtolower(trim($attributes['scheme'] ?? 'bearer'));
 
@@ -82,27 +85,23 @@ final readonly class AuthProfileStore
             'scheme' => $scheme,
             'credential_header' => $header,
             'credential_hint' => self::mask($credential),
-            // Ciphertext only. The plaintext never touches the cache driver.
+            // Ciphertext only. The plaintext never touches the session driver.
             'credential' => $this->encrypter->encrypt($credential),
         ];
 
-        $profiles = $this->withBucketLock($sessionKey, function () use ($sessionKey, $id, $record): array {
-            $profiles = $this->raw($sessionKey);
-            $profiles[$id] = $record;
+        $profiles = $this->raw();
+        $profiles[$id] = $record;
 
-            // Every write refreshes the bucket's TTL, so without a cap a session that
-            // keeps posting keeps an ever-growing array alive indefinitely — and each
-            // read unserializes all of it. The oldest entries go first.
-            $max = self::maxProfiles();
+        // Every request unserializes the whole session payload, so an uncapped list
+        // would grow the cost of every page load in the application. The oldest
+        // entries go first.
+        $max = self::maxProfiles();
 
-            if (count($profiles) > $max) {
-                $profiles = array_slice($profiles, -$max, null, true);
-            }
+        if (count($profiles) > $max) {
+            $profiles = array_slice($profiles, -$max, null, true);
+        }
 
-            $this->cache->put($this->cacheKey($sessionKey), $profiles, $this->ttl());
-
-            return $profiles;
-        });
+        $this->write($profiles);
 
         return self::withoutCredential($profiles[$id]);
     }
@@ -112,11 +111,11 @@ final readonly class AuthProfileStore
      *
      * @return list<array{id: string, label: string, base_url: string, server_variables: array<string, string>, scheme: string, credential_header: string|null, credential_hint: string}>
      */
-    public function all(string $sessionKey): array
+    public function all(): array
     {
         return array_values(array_map(
             static fn (array $profile): array => self::withoutCredential($profile),
-            $this->readRefreshingTtl($sessionKey),
+            $this->raw(),
         ));
     }
 
@@ -125,48 +124,38 @@ final readonly class AuthProfileStore
      *
      * @return array{id: string, label: string, base_url: string, server_variables: array<string, string>, scheme: string, credential_header: string|null, credential_hint: string}|null
      */
-    public function find(string $sessionKey, string $profileId): ?array
+    public function find(string $profileId): ?array
     {
-        $profile = $this->readRefreshingTtl($sessionKey)[$profileId] ?? null;
+        $profile = $this->raw()[$profileId] ?? null;
 
         return $profile === null ? null : self::withoutCredential($profile);
     }
 
-    public function forget(string $sessionKey, string $profileId): void
+    public function forget(string $profileId): void
     {
-        $this->withBucketLock($sessionKey, function () use ($sessionKey, $profileId): bool {
-            $profiles = $this->raw($sessionKey);
+        $profiles = $this->raw();
 
-            if (! array_key_exists($profileId, $profiles)) {
-                return true;
-            }
+        if (! array_key_exists($profileId, $profiles)) {
+            return;
+        }
 
-            unset($profiles[$profileId]);
+        unset($profiles[$profileId]);
 
-            if ($profiles === []) {
-                $this->cache->forget($this->cacheKey($sessionKey));
-
-                return true;
-            }
-
-            $this->cache->put($this->cacheKey($sessionKey), $profiles, $this->ttl());
-
-            return true;
-        });
+        $this->write($profiles);
     }
 
-    public function flush(string $sessionKey): void
+    public function flush(): void
     {
-        $this->cache->forget($this->cacheKey($sessionKey));
+        Session::forget(self::SESSION_KEY);
     }
 
     /**
      * The ONLY method that returns plaintext. Call it while building the outbound
      * request and nowhere else — never to render, log or echo the value back.
      */
-    public function revealCredentialForOutboundRequest(string $sessionKey, string $profileId): ?string
+    public function revealCredentialForOutboundRequest(string $profileId): ?string
     {
-        $profile = $this->readRefreshingTtl($sessionKey)[$profileId] ?? null;
+        $profile = $this->raw()[$profileId] ?? null;
 
         if ($profile === null || ! is_string($profile['credential'] ?? null)) {
             return null;
@@ -182,67 +171,12 @@ final readonly class AuthProfileStore
     }
 
     /**
-     * Read path with a rolling lifetime: finding a live bucket pushes its expiry
-     * out by a full ttl, so a profile that is actually in use does not die in the
-     * middle of a session. Only the expiry moves — the stored record, ciphertext
-     * included, is re-put exactly as it was read.
-     *
-     * A missing or already-expired bucket is never recreated, so a read cannot
-     * resurrect a credential. The lifetime is therefore idle-based with no
-     * absolute ceiling above it: the configured ttl is the only bound on how
-     * long a credential survives, which is why that value is chosen carefully.
-     *
      * @return array<string, array<string, mixed>>
      */
-    private function readRefreshingTtl(string $sessionKey): array
-    {
-        return $this->withBucketLock($sessionKey, function () use ($sessionKey): array {
-            $profiles = $this->raw($sessionKey);
-
-            if ($profiles === []) {
-                return [];
-            }
-
-            $this->cache->put($this->cacheKey($sessionKey), $profiles, $this->ttl());
-
-            return $profiles;
-        });
-    }
-
-    /**
-     * Serializes the read-modify-write window on a session bucket wherever the cache
-     * driver offers a lock. Without it a rolling-ttl read that started before a delete
-     * re-puts its own snapshot afterwards, bringing a removed credential back for a
-     * full ttl. A driver without lock support, or a lock that cannot be taken in time,
-     * falls back to the unsynchronised path rather than failing the request.
-     *
-     * @template TReturn
-     *
-     * @param  callable(): TReturn  $callback
-     * @return TReturn
-     */
-    private function withBucketLock(string $sessionKey, callable $callback): mixed
-    {
-        $store = method_exists($this->cache, 'getStore') ? $this->cache->getStore() : null;
-
-        if (! $store instanceof LockProvider) {
-            return $callback();
-        }
-
-        try {
-            return $store->lock(self::KEY_PREFIX.'lock:'.sha1($sessionKey), 5)->block(1, $callback);
-        } catch (LockTimeoutException) {
-            return $callback();
-        }
-    }
-
-    /**
-     * @return array<string, array<string, mixed>>
-     */
-    private function raw(string $sessionKey): array
+    private function raw(): array
     {
         /** @var mixed $stored */
-        $stored = $this->cache->get($this->cacheKey($sessionKey));
+        $stored = Session::get(self::SESSION_KEY);
 
         if (! is_array($stored)) {
             return [];
@@ -257,6 +191,22 @@ final readonly class AuthProfileStore
         }
 
         return $profiles;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $profiles
+     */
+    private function write(array $profiles): void
+    {
+        // An empty list is removed rather than stored: a session that carries an
+        // empty array forever is a key the driver keeps writing for nothing.
+        if ($profiles === []) {
+            Session::forget(self::SESSION_KEY);
+
+            return;
+        }
+
+        Session::put(self::SESSION_KEY, $profiles);
     }
 
     /**
@@ -340,24 +290,6 @@ final readonly class AuthProfileStore
         }
 
         return str_repeat('*', 4).mb_substr($credential, -4);
-    }
-
-    /**
-     * The raw session id is hashed so it never appears in a cache key, which can
-     * surface in driver logs.
-     */
-    private function cacheKey(string $sessionKey): string
-    {
-        return self::KEY_PREFIX.hash('sha256', $sessionKey);
-    }
-
-    private function ttl(): int
-    {
-        /** @var mixed $ttl */
-        $ttl = config('api-dock.try_it.ttl', self::DEFAULT_TTL);
-        $ttl = is_numeric($ttl) ? (int) $ttl : self::DEFAULT_TTL;
-
-        return $ttl > 0 ? $ttl : self::DEFAULT_TTL;
     }
 
     private static function maxProfiles(): int

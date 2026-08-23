@@ -25,7 +25,11 @@ return [
     ],
 
     'try_it' => [
-        'enabled' => false, // Keep outbound try-it requests disabled unless explicitly enabled.
+        // On by default so the panel is usable out of the box: with `allowed_hosts` empty
+        // below, the proxy reaches THIS application's own host and nothing else. Note that
+        // it inherits `middleware` above — leave that at a bare `['web']` and the proxy is
+        // anonymous like the panel, so gate both before you deploy.
+        'enabled' => true,
         // This application's own host — and any subdomain of it — is always reachable and needs no entry here; trying your own documented API is the point of the panel.
         // This list is only for FOREIGN hosts. Empty denies every one of them. A bare name ('api.example.com') is an exact match; a leading dot ('.example.com') covers that site and its subdomains, the way a cookie domain does.
         'allowed_hosts' => [],
@@ -39,7 +43,7 @@ return [
         'max_response_bytes' => 262144, // 256 KB ceiling on the proxied body; anything beyond it is truncated and flagged rather than buffered.
         'throttle' => '30,1', // Rate limit (requests,minutes) on the proxy route, since every call is an outbound request from your server.
         'allowed_methods' => ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // Verbs the panel may request; narrow this to widen nothing.
-        'ttl' => 3600, // IDLE lifetime in seconds for try-it credentials, not an absolute one: every read and every write pushes the expiry out by this much, so a session in active use keeps its credentials and only an unattended one loses them. There is no ceiling above this, so raise it deliberately. Non-positive or non-numeric falls back to 3600.
-        'max_profiles' => 10, // Credential profiles kept per session; the oldest is dropped past this. Every read and write refreshes the bucket TTL, so an uncapped bucket would never expire.
+        // Credential profiles live in the session, so they last exactly as long as the reader's login: no expiry to configure, and logging out takes them with it.
+        'max_profiles' => 10, // Credential profiles kept per session; the oldest is dropped past this. Every request unserializes the whole session payload, so an uncapped list would tax every page load.
     ],
 ];

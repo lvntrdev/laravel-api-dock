@@ -9,7 +9,9 @@ it('boots the package provider and exposes its configuration', function (): void
     expect(app()->getProvider(ApiDockServiceProvider::class))
         ->toBeInstanceOf(ApiDockServiceProvider::class)
         ->and(config('api-dock.route_prefix'))->toBe('api-dock')
-        ->and(config('api-dock.try_it.enabled'))->toBeFalse()
+        // On out of the box, but reaching this application's own host only: the
+        // empty allowlist is what keeps the shipped default from being an open proxy.
+        ->and(config('api-dock.try_it.enabled'))->toBeTrue()
         ->and(config('api-dock.try_it.allowed_hosts'))->toBe([]);
 
     $publishPaths = ServiceProvider::pathsToPublish(

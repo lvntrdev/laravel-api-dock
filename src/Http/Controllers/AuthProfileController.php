@@ -7,6 +7,7 @@ namespace LvntR\ApiDock\Http\Controllers;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
 use InvalidArgumentException;
 use LvntR\ApiDock\Support\AuthProfileStore;
@@ -50,13 +51,13 @@ final class AuthProfileController
             return self::disabled();
         }
 
-        $sessionKey = self::sessionKey();
-
-        if ($sessionKey === null) {
+        if (! self::sessionStarted()) {
             return self::error('A session is required to use try-it profiles.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        return new JsonResponse(['profiles' => $this->profiles->all($sessionKey)]);
+        return new JsonResponse([
+            'profiles' => array_map(self::forJson(...), $this->profiles->all()),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -65,9 +66,7 @@ final class AuthProfileController
             return self::disabled();
         }
 
-        $sessionKey = self::sessionKey();
-
-        if ($sessionKey === null) {
+        if (! self::sessionStarted()) {
             return self::error('A session is required to use try-it profiles.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
@@ -88,7 +87,7 @@ final class AuthProfileController
         ]);
 
         try {
-            $profile = $this->profiles->put($sessionKey, [
+            $profile = $this->profiles->put([
                 'label' => self::stringOr($data['label'] ?? null, 'Profile'),
                 'base_url' => self::stringOr($data['base_url'] ?? null, ''),
                 'server_variables' => self::stringMap($data['server_variables'] ?? []),
@@ -99,14 +98,24 @@ final class AuthProfileController
         } catch (InvalidArgumentException $exception) {
             // The store's own messages name the scheme or the header, never the value.
             return self::error($exception->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY);
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
             // $data holds the credential in this frame; an exception renderer prints
             // frame arguments, so nothing from below may propagate out of here.
+            //
+            // The class and message go to the log without the exception object:
+            // a stack trace renders its string arguments, and the credential is
+            // one of them. Swallowing the failure entirely left an operator with
+            // a panel that says "could not be stored" and a log that says nothing.
+            Log::error('API Dock could not store a try-it profile.', [
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
             return self::error('The try-it profile could not be stored.', Response::HTTP_INTERNAL_SERVER_ERROR);
         }
 
         // Already masked by the store: `credential_hint`, never `credential`.
-        return new JsonResponse(['profile' => $profile], Response::HTTP_CREATED);
+        return new JsonResponse(['profile' => self::forJson($profile)], Response::HTTP_CREATED);
     }
 
     public function destroy(string $profile): JsonResponse
@@ -115,15 +124,28 @@ final class AuthProfileController
             return self::disabled();
         }
 
-        $sessionKey = self::sessionKey();
-
-        if ($sessionKey === null) {
+        if (! self::sessionStarted()) {
             return self::error('A session is required to use try-it profiles.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $this->profiles->forget($sessionKey, $profile);
+        $this->profiles->forget($profile);
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * A profile whose `server_variables` map is empty encodes as a JSON ARRAY —
+     * `[]` — because that is what an empty PHP array is, and a client that reads
+     * the field as an object then rejects the whole profile. Casting it makes the
+     * field an object in every case, which is what the field means and what the
+     * panel validates against.
+     *
+     * @param  array{id: string, label: string, base_url: string, server_variables: array<string, string>, scheme: string, credential_header: string|null, credential_hint: string}  $profile
+     * @return array<string, mixed>
+     */
+    private static function forJson(array $profile): array
+    {
+        return [...$profile, 'server_variables' => (object) $profile['server_variables']];
     }
 
     private static function enabled(): bool
@@ -208,21 +230,15 @@ final class AuthProfileController
 
     /**
      * Fails closed on an unstarted session — see the note on the same helper in
-     * {@see ProxyController}: without StartSession the id is process-scoped, so
-     * a persistent worker would hand every visitor the same credential bucket.
+     * {@see ProxyController}: without StartSession there is nothing to store a
+     * credential in that outlives the request.
      */
-    private static function sessionKey(): ?string
+    private static function sessionStarted(): bool
     {
         try {
-            if (! Session::isStarted()) {
-                return null;
-            }
-
-            $id = Session::getId();
+            return Session::isStarted();
         } catch (Throwable) {
-            return null;
+            return false;
         }
-
-        return is_string($id) && $id !== '' ? $id : null;
     }
 }

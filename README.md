@@ -13,7 +13,8 @@ Install it, visit `/api-dock`, and the API you already have is browsable.
   a light and a dark theme, and an English and Turkish interface.
 - **Try it, through your server** — the reader sends the request they are looking at, and the package proxies
   it: host allowlist, DNS-rebinding-safe address pinning, response size cap. Credentials stay server-side,
-  encrypted and scoped to the session; the browser only ever holds a masked hint. Disabled until you enable it.
+  encrypted and scoped to the session; the browser only ever holds a masked hint. On by default, and reaching
+  your own application's host only until you widen the allowlist.
 - **An AI prompt tab** — one copy button hands a model the whole operation as context, plus the MCP tool
   definition and the `llms.txt` section for that endpoint on their own.
 - **A spec diff tab** — paste the output of `php artisan api-dock:diff --json` and read what changed between
@@ -116,10 +117,12 @@ before rolling it out.
   middleware stack is `['web']`. The generated document exposes your internal API surface, so put the routes
   behind your own auth middleware — the `middleware` config key in
   [Configuration reference](#configuration-reference) — before deploying anywhere public.
-- **The try-it proxy is off by default.** Turn it on deliberately, keep `try_it.allowed_hosts` and
-  `try_it.allowed_methods` as narrow as the job needs, and read [Try-it security contract](#try-it-security-contract) first.
-- Session credentials are stored in the configured cache, encrypted with the application encrypter and scoped
-  to the session, and expire after `try_it.ttl` of inactivity. They are not kept in the browser.
+- **The try-it proxy is on by default, but only towards this application's own host.** `try_it.allowed_hosts`
+  ships empty, which denies every foreign host; widen it deliberately, keep `try_it.allowed_methods` as narrow
+  as the job needs, and read [Try-it security contract](#try-it-security-contract) first. The proxy inherits the
+  `middleware` stack above, so gating the panel gates it too.
+- Session credentials are stored in the session itself, encrypted with the application encrypter, and they last
+  exactly as long as the reader's login: logging out takes them with it. They are not kept in the browser.
 - MCP, `llms.txt` and diff artifacts are produced by Artisan, not by HTTP endpoints — nothing extra is exposed
   on the route table.
 - A non-text upstream response is not proxied back verbatim. A body that is not valid UTF-8 is replaced with a
@@ -139,7 +142,7 @@ These are all keys shipped by `config/api-dock.php`.
 | `ai.include_examples` | `true` | Includes `x-ai-examples` sections in `llms.txt`. It does not remove examples from the OpenAPI document. |
 | `ai.mcp_opt_in` | `false` | When false, all operations except those with `AiTool(enabled: false)` become MCP tools. When true, only operations with `AiTool(enabled: true)` are exported. |
 | `snapshot.path` | `storage_path('api-dock/openapi.json')` | Stored OpenAPI snapshot read by `sync` and `diff`. |
-| `try_it.enabled` | `false` | Enables outbound try-it requests and credential-profile endpoints. |
+| `try_it.enabled` | `true` | Enables outbound try-it requests and credential-profile endpoints. On by default, and bounded by `try_it.allowed_hosts`, which ships empty: only this application's own host is reachable until you widen it. |
 | `try_it.allowed_hosts` | `[]` | Host allowlist. Empty denies all hosts. A bare entry is exact; a leading-dot entry matches subdomains. |
 | `try_it.self_hosts` | `[]` | Additional domains served by this application. Each entry and its subdomains bypass the foreign-host safety gates; the host from `APP_URL` is already included. |
 | `try_it.timeout` | `10` | Maximum outbound request duration in seconds. Non-positive or non-numeric values fall back to 10. |
@@ -147,8 +150,7 @@ These are all keys shipped by `config/api-dock.php`.
 | `try_it.max_response_bytes` | `262144` | Maximum proxied response body, 256 KiB by default. Excess content is truncated and reported with `truncated: true`. |
 | `try_it.throttle` | `'30,1'` | Laravel throttle parameters (`requests,minutes`) applied to the proxy and profile routes. |
 | `try_it.allowed_methods` | `['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']` | Methods accepted from the panel. Configuration can narrow this fixed supported set, not expand it. |
-| `try_it.ttl` | `3600` | Idle lifetime in seconds for session credential profiles: every read and every write pushes the expiry out by this much, so the clock measures inactivity rather than the age of the credential. There is no absolute ceiling above it. Non-positive or non-numeric values fall back to 3600. |
-| `try_it.max_profiles` | `10` | Credential profiles kept per session; the oldest is dropped past this. Every read and write refreshes the bucket lifetime, so an uncapped bucket would never expire. |
+| `try_it.max_profiles` | `10` | Credential profiles kept per session; the oldest is dropped past this. Every request unserializes the whole session payload, so an uncapped list would tax every page load. |
 | `include_generation_timestamp` | `false` | Stamp the generation time into the document. Off by default: it turns every regeneration into a diff. |
 
 For `allowed_hosts`, a bare entry is an exact host name, and a leading dot covers the site and its subdomains: `.example.com` matches both `example.com` and `api.example.com`. A near miss never matches either form — `evil-example.com` and `example.com.attacker.test` are both denied.
@@ -403,7 +405,7 @@ php artisan api-dock:export --mcp --output=storage/app/agent-contracts
 
 ## Try-it security contract
 
-The try-it proxy is disabled by default. Setting `api-dock.try_it.enabled` to `true` is a deliberate operator decision.
+The try-it proxy is enabled by default so the panel works out of the box, and its reach is bounded by the empty `try_it.allowed_hosts`: this application's own host and nothing else. Widening that list, and leaving `middleware` open enough for anonymous visitors to reach the panel, are both deliberate operator decisions — set `api-dock.try_it.enabled` to `false` to close the proxy outright.
 
 **This application's own host needs no allowlist entry.** The self host comes from the host in `APP_URL` (`config('app.url')`), and any subdomain of it is covered automatically. If this application answers on any other domain, list that bare hostname in `try_it.self_hosts`. A subdomain of a `self_hosts` entry also counts as self, but its parent domain does not. Entries are lowercased and trimmed, with a trailing dot removed; empty entries, malformed hostnames, leading-dot forms such as `.example.com`, and address literals in any spelling (`127.0.0.1`, `127.1`, `2130706433`, `0x7f000001`) are ignored.
 
@@ -415,7 +417,7 @@ The host allowlist governs **foreign** hosts only, and is deny-by-default: an em
 
 Only HTTP and HTTPS URLs are accepted. URLs carrying authority credentials, malformed hosts, conventionally internal host names, and internal DNS suffixes are rejected. After DNS resolution, every address is checked against private, loopback, link-local, shared, unspecified, documentation, benchmark, multicast, reserved, and cloud-metadata-relevant IPv4 and IPv6 ranges. Every resolved address must pass. The checked addresses are pinned with cURL for the actual connection, closing the DNS-rebinding window between validation and connection. Redirects are not followed.
 
-Credentials are scoped to the current Laravel session. They are encrypted with the application's encrypter before being stored in the cache and expire after `try_it.ttl` of inactivity: listing a profile, looking one up, or sending a request with it pushes the expiry out by another full `try_it.ttl`, so credentials survive an active working session, while an abandoned one still expires. A read never revives an already-expired profile, and there is no absolute cap above the idle window, so pick `try_it.ttl` deliberately. A profile also carries `server_variables`, the values substituted into a server template; that map is ordinary non-secret data and is returned in the clear like `base_url`, so a credential must never be put in it. Profile list and lookup responses omit the ciphertext and plaintext; they return only profile metadata and `credential_hint`, which is `****` for credentials of eight characters or fewer and `****` plus the last four characters otherwise. The outbound request path is the only code path that decrypts a credential. Reads never return a usable credential to the browser, so the panel does not regain one after profile creation. The browser keeps only the selected profile id, the server variable values, and the plain base URL under the `api-dock:try-it` key in `localStorage`, so a page reload does not reset the panel. That store never holds a credential, a credential header value, or a `credential_hint`, but it does outlive the session and is shared by every specification on the origin — on a shared browser, clear site data when you are done.
+Credentials are scoped to the current Laravel session, and they are stored in it: the profile list lives in the session payload under `api-dock.try-it.profiles`, encrypted with the application's encrypter. There is no separate expiry to configure and none to get wrong — a profile lasts exactly as long as the session that created it, and logging out, which invalidates the session, takes every stored credential with it. A profile also carries `server_variables`, the values substituted into a server template; that map is ordinary non-secret data and is returned in the clear like `base_url`, so a credential must never be put in it. Profile list and lookup responses omit the ciphertext and plaintext; they return only profile metadata and `credential_hint`, which is `****` for credentials of eight characters or fewer and `****` plus the last four characters otherwise. The outbound request path is the only code path that decrypts a credential. Reads never return a usable credential to the browser, so the panel does not regain one after profile creation. The browser keeps the selected profile id, the server variable values, the plain base URL, and the form values the reader typed per operation — path, query and header parameters plus the request body — under the `api-dock:try-it` key in `localStorage`, so a page reload does not reset the panel. Those form values are whatever the reader put in the try-it form, so a request body that carries a password or a token is remembered there in the clear; clear site data, or avoid typing a live secret into a body, on a browser you share. That store never holds a credential, a credential header value, or a `credential_hint`, but it does outlive the session and is shared by every specification on the origin — on a shared browser, clear site data when you are done. One consequence is worth stating plainly: with the `cookie` session driver the whole session payload lives in the reader's browser, so the encrypted profile travels with it. Use a server-side session driver — `database`, `redis`, `file` — if you enable the try-it proxy.
 
 Response bodies are capped at `try_it.max_response_bytes`. Content beyond the cap is discarded, the returned body is truncated to the cap, and the response carries `truncated: true`; the proxy does not buffer an unbounded body. Hop-by-hop headers, cookies, forwarding headers, CSRF headers, proxy-prefixed headers, and browser `Sec-*` headers are stripped in both directions.
 

@@ -6,7 +6,6 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Log\Events\MessageLogged;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
@@ -14,18 +13,29 @@ use LvntR\ApiDock\Support\AuthProfileStore;
 use LvntR\ApiDock\Support\OutboundRequestGuard;
 
 /**
- * Cover for the credential store: what it puts on disk, what it hands back, how
- * long it keeps it, and whose it is.
+ * Cover for the credential store: what it puts in the session, what it hands
+ * back, how long it survives, and whose it is.
  *
  * The credential below is an obvious dummy. The whole point of these assertions
  * is that the literal string must appear in exactly two places — the encrypted
- * cache value and the outbound Authorization header — and nowhere else.
+ * session value and the outbound Authorization header — and nowhere else.
  */
 const API_DOCK_STORE_CREDENTIAL = 'dummy-token-1234';
 
 /** Same masking rule as the store: four stars plus the last four characters. */
 const API_DOCK_STORE_HINT = '****1234';
 
+/**
+ * Mirrors the store's own private session key. Nothing public exposes it, so a
+ * storage assertion has to name it again here.
+ */
+const API_DOCK_STORE_SESSION_KEY = 'api-dock.try-it.profiles';
+
+/**
+ * A session identity for HTTP-level tests only: the store itself no longer
+ * takes a session argument, so these two values now do their isolating work
+ * purely as `Session::getName()` cookie values switched between requests.
+ */
 const API_DOCK_STORE_SESSION_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 const API_DOCK_STORE_SESSION_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -57,18 +67,13 @@ function apiDockStoreResolvesTo(array $addresses): void
     ));
 }
 
-/** The store hashes the session id into its cache key; mirror that here. */
-function apiDockStoreCacheKey(string $sessionKey): string
-{
-    return 'api-dock:try-it:profiles:'.hash('sha256', $sessionKey);
-}
-
 /**
- * Everything the cache driver is actually holding for a session, as a string.
+ * Everything the session is actually holding for the CURRENT visitor, as a
+ * string — the direct replacement for reading the old cache entry.
  */
-function apiDockStoreRawEntry(string $sessionKey): string
+function apiDockStoreRawEntry(): string
 {
-    return var_export(Cache::get(apiDockStoreCacheKey($sessionKey)), true);
+    return var_export(session()->get(API_DOCK_STORE_SESSION_KEY), true);
 }
 
 /**
@@ -88,7 +93,7 @@ function apiDockStoreVariableMap(int $count): array
 }
 
 /**
- * Write a profile straight into the cache in the record shape that existed
+ * Write a profile straight into the session in the record shape that existed
  * BEFORE server_variables did: no such key at all. Nothing but a hand-written
  * record can reproduce that, since the store always writes the field now.
  *
@@ -96,7 +101,7 @@ function apiDockStoreVariableMap(int $count): array
  */
 function apiDockStoreSeedLegacyProfile(string $id, array $overrides = []): void
 {
-    Cache::put(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A), [$id => array_merge([
+    session()->put(API_DOCK_STORE_SESSION_KEY, [$id => array_merge([
         'id' => $id,
         'label' => 'Legacy',
         'base_url' => 'https://api.example.com',
@@ -104,7 +109,7 @@ function apiDockStoreSeedLegacyProfile(string $id, array $overrides = []): void
         'credential_header' => null,
         'credential_hint' => API_DOCK_STORE_HINT,
         'credential' => app('encrypter')->encrypt(API_DOCK_STORE_CREDENTIAL),
-    ], $overrides)], 600);
+    ], $overrides)]);
 }
 
 /**
@@ -154,23 +159,23 @@ beforeEach(function (): void {
 |--------------------------------------------------------------------------
 */
 
-it('never writes the credential into the cache in plaintext', function (): void {
+it('never writes the credential into the session in plaintext', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, [
+    $profile = $store->put([
         'label' => 'Dummy profile',
         'scheme' => 'bearer',
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
 
-    $raw = apiDockStoreRawEntry(API_DOCK_STORE_SESSION_A);
+    $raw = apiDockStoreRawEntry();
 
     expect($raw)->not->toBeEmpty()
         ->and($raw)->not->toContain(API_DOCK_STORE_CREDENTIAL)
         ->and($raw)->toContain($profile['id']);
 
     /** @var array<string, array<string, mixed>> $entry */
-    $entry = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
+    $entry = session()->get(API_DOCK_STORE_SESSION_KEY);
     $ciphertext = $entry[$profile['id']]['credential'];
 
     expect($ciphertext)->toBeString()
@@ -178,13 +183,16 @@ it('never writes the credential into the cache in plaintext', function (): void 
         ->and(app('encrypter')->decrypt($ciphertext))->toBe(API_DOCK_STORE_CREDENTIAL);
 });
 
-it('does not use the raw session id as the cache key', function (): void {
+it('keeps every profile under the documented session key and not under the session id itself', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
+    $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
 
-    expect(Cache::get('api-dock:try-it:profiles:'.API_DOCK_STORE_SESSION_A))->toBeNull()
-        ->and(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeArray();
+    expect(session()->get(API_DOCK_STORE_SESSION_KEY))->toBeArray()
+        // A second, redundant scope keyed off the session id itself would be a
+        // needless duplicate of the isolation the session already gives for
+        // free — and a silent no-op the moment that id rotates.
+        ->and(session()->has(Session::getId()))->toBeFalse();
 });
 
 /*
@@ -196,7 +204,7 @@ it('does not use the raw session id as the cache key', function (): void {
 it('returns a masked profile from every ordinary read path', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $created = $store->put(API_DOCK_STORE_SESSION_A, [
+    $created = $store->put([
         'label' => 'Dummy profile',
         'base_url' => 'https://api.example.com',
         'scheme' => 'bearer',
@@ -204,11 +212,11 @@ it('returns a masked profile from every ordinary read path', function (): void {
     ]);
 
     /** @var array<string, array<string, mixed>> $entry */
-    $entry = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
+    $entry = session()->get(API_DOCK_STORE_SESSION_KEY);
     $ciphertext = (string) $entry[$created['id']]['credential'];
 
-    $found = $store->find(API_DOCK_STORE_SESSION_A, $created['id']);
-    $listed = $store->all(API_DOCK_STORE_SESSION_A);
+    $found = $store->find($created['id']);
+    $listed = $store->all();
 
     foreach ([$created, $found, $listed[0]] as $view) {
         $encoded = (string) json_encode($view);
@@ -220,7 +228,7 @@ it('returns a masked profile from every ordinary read path', function (): void {
     }
 
     // The one method whose name says it returns plaintext still does.
-    expect($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $created['id']))
+    expect($store->revealCredentialForOutboundRequest($created['id']))
         ->toBe(API_DOCK_STORE_CREDENTIAL);
 });
 
@@ -234,7 +242,7 @@ it('keeps the credential and the ciphertext out of the profile index response', 
     $created->assertCreated()->assertJsonPath('profile.credential_hint', API_DOCK_STORE_HINT);
 
     /** @var array<string, array<string, mixed>> $entry */
-    $entry = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
+    $entry = session()->get(API_DOCK_STORE_SESSION_KEY);
     $ciphertext = (string) $entry[(string) $created->json('profile.id')]['credential'];
 
     $index = $this->getJson('/api-dock/try-it/profiles');
@@ -248,41 +256,41 @@ it('keeps the credential and the ciphertext out of the profile index response', 
     }
 });
 
+it('encodes an empty server variable map as a JSON object on every response', function (): void {
+    // An empty PHP array encodes as `[]`, and a client that reads this field as a
+    // map rejects the profile outright — which is how a stored credential turned
+    // into a panel that looked like it had saved nothing at all.
+    $created = $this->postJson('/api-dock/try-it/profiles', [
+        'credential' => API_DOCK_STORE_CREDENTIAL,
+    ]);
+
+    $created->assertCreated();
+
+    $index = $this->getJson('/api-dock/try-it/profiles');
+
+    $index->assertOk();
+
+    expect((string) $created->getContent())->toContain('"server_variables":{}')
+        ->and((string) $index->getContent())->toContain('"server_variables":{}')
+        ->and((string) $index->getContent())->not->toContain('"server_variables":[]');
+});
+
+it('still encodes a populated server variable map as an object', function (): void {
+    $this->postJson('/api-dock/try-it/profiles', [
+        'credential' => API_DOCK_STORE_CREDENTIAL,
+        'server_variables' => ['tenant' => 'acme'],
+    ])->assertCreated();
+
+    $this->getJson('/api-dock/try-it/profiles')
+        ->assertOk()
+        ->assertJsonPath('profiles.0.server_variables.tenant', 'acme');
+});
+
 /*
 |--------------------------------------------------------------------------
-| Lifetime
+| Removal and capacity
 |--------------------------------------------------------------------------
 */
-
-it('lets the configured ttl expire the profile', function (): void {
-    config()->set('api-dock.try_it.ttl', 60);
-
-    $store = app(AuthProfileStore::class);
-
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
-
-    expect($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->not->toBeNull();
-
-    $this->travel(61)->seconds();
-
-    expect($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->toBeNull()
-        ->and($store->all(API_DOCK_STORE_SESSION_A))->toBe([])
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))->toBeNull()
-        ->and(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeNull();
-});
-
-it('keeps the profile alive up to the ttl boundary', function (): void {
-    config()->set('api-dock.try_it.ttl', 60);
-
-    $store = app(AuthProfileStore::class);
-
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
-
-    $this->travel(30)->seconds();
-
-    expect($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))
-        ->toBe(API_DOCK_STORE_CREDENTIAL);
-});
 
 it('caps the profiles one session can keep and evicts the oldest first', function (): void {
     config()->set('api-dock.try_it.max_profiles', 3);
@@ -292,45 +300,45 @@ it('caps the profiles one session can keep and evicts the oldest first', functio
     $ids = [];
 
     for ($i = 0; $i < 5; $i++) {
-        $ids[] = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL])['id'];
+        $ids[] = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL])['id'];
     }
 
-    // Without the cap the bucket grows without bound AND its ttl is renewed on
-    // every write, so it never expires while a session keeps posting.
-    expect($store->all(API_DOCK_STORE_SESSION_A))->toHaveCount(3)
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $ids[0]))->toBeNull()
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $ids[1]))->toBeNull()
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $ids[4]))->not->toBeNull();
+    // Without the cap the bucket grows without bound, and it never shrinks
+    // while a session keeps posting.
+    expect($store->all())->toHaveCount(3)
+        ->and($store->find($ids[0]))->toBeNull()
+        ->and($store->find($ids[1]))->toBeNull()
+        ->and($store->find($ids[4]))->not->toBeNull();
 });
 
 it('removes a profile with forget and every profile with flush', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $first = $store->put(API_DOCK_STORE_SESSION_A, ['label' => 'One', 'credential' => API_DOCK_STORE_CREDENTIAL]);
-    $second = $store->put(API_DOCK_STORE_SESSION_A, ['label' => 'Two', 'credential' => API_DOCK_STORE_CREDENTIAL.'-2']);
+    $first = $store->put(['label' => 'One', 'credential' => API_DOCK_STORE_CREDENTIAL]);
+    $second = $store->put(['label' => 'Two', 'credential' => API_DOCK_STORE_CREDENTIAL.'-2']);
 
-    $store->forget(API_DOCK_STORE_SESSION_A, $first['id']);
+    $store->forget($first['id']);
 
-    expect($store->find(API_DOCK_STORE_SESSION_A, $first['id']))->toBeNull()
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $first['id']))->toBeNull()
-        ->and(apiDockStoreRawEntry(API_DOCK_STORE_SESSION_A))->not->toContain($first['id'])
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $second['id']))->not->toBeNull();
+    expect($store->find($first['id']))->toBeNull()
+        ->and($store->revealCredentialForOutboundRequest($first['id']))->toBeNull()
+        ->and(apiDockStoreRawEntry())->not->toContain($first['id'])
+        ->and($store->find($second['id']))->not->toBeNull();
 
-    $store->flush(API_DOCK_STORE_SESSION_A);
+    $store->flush();
 
-    expect($store->all(API_DOCK_STORE_SESSION_A))->toBe([])
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $second['id']))->toBeNull()
-        ->and(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeNull();
+    expect($store->all())->toBe([])
+        ->and($store->revealCredentialForOutboundRequest($second['id']))->toBeNull()
+        ->and(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse();
 });
 
-it('drops the cache entry entirely once forget removes the last profile', function (): void {
+it('drops the session entry entirely once forget removes the last profile', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
 
-    $store->forget(API_DOCK_STORE_SESSION_A, $profile['id']);
+    $store->forget($profile['id']);
 
-    expect(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeNull();
+    expect(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse();
 });
 
 /*
@@ -342,35 +350,28 @@ it('drops the cache entry entirely once forget removes the last profile', functi
 it('does not let one session read another session profile', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, [
-        'label' => 'Owned by A',
+    $profile = $store->put([
+        'label' => 'Owned by this visitor',
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
 
-    expect($store->find(API_DOCK_STORE_SESSION_B, $profile['id']))->toBeNull()
-        ->and($store->all(API_DOCK_STORE_SESSION_B))->toBe([])
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_B, $profile['id']))->toBeNull()
-        ->and(apiDockStoreRawEntry(API_DOCK_STORE_SESSION_B))->toBe('NULL')
-        // Still readable by its owner, so the assertion above is isolation and
-        // not simply a store that lost the profile.
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))
-        ->toBe(API_DOCK_STORE_CREDENTIAL);
+    // Still readable before the switch, so the assertions below are isolation
+    // and not simply a store that lost the profile.
+    expect($store->find($profile['id']))->not->toBeNull();
+
+    // The store no longer takes a session argument of its own to isolate on —
+    // it trusts whatever session is current. Standing in for a second visitor
+    // is therefore exactly what flushing the session is: the same thing a
+    // logout does to the next reader.
+    $this->flushSession();
+
+    expect($store->find($profile['id']))->toBeNull()
+        ->and($store->all())->toBe([])
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBeNull();
 });
 
-it('does not let one session delete another session profile', function (): void {
-    $store = app(AuthProfileStore::class);
-
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
-
-    $store->forget(API_DOCK_STORE_SESSION_B, $profile['id']);
-    $store->flush(API_DOCK_STORE_SESSION_B);
-
-    expect($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->not->toBeNull();
-});
-
-it('does not let a second session use a profile id over http', function (): void {
+it('does not let a second session delete a profile created under a different cookie', function (): void {
     $created = $this->postJson('/api-dock/try-it/profiles', [
-        'label' => 'Owned by A',
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
 
@@ -378,9 +379,41 @@ it('does not let a second session use a profile id over http', function (): void
 
     $profileId = (string) $created->json('profile.id');
 
-    // A different cookie is the whole of the switch: session B never carries A's
-    // id, which is exactly what a second browser looks like to StartSession.
-    $this->withUnencryptedCookie(Session::getName(), API_DOCK_STORE_SESSION_B);
+    // The array session driver in this test process reuses ONE Store instance
+    // across every request it serves, and that Store merges rather than
+    // replaces its attributes on each load — flushing before the swap is what
+    // keeps the second cookie from inheriting the first cookie's in-memory
+    // data. Two real requests never share a Store at all, so this step has no
+    // counterpart in production.
+    $this->flushSession()->withUnencryptedCookie(Session::getName(), API_DOCK_STORE_SESSION_B);
+
+    // A delete against an id it doesn't own is a no-op, exactly like deleting
+    // an id that never existed at all.
+    $this->deleteJson('/api-dock/try-it/profiles/'.$profileId)->assertNoContent();
+
+    $this->flushSession()->withUnencryptedCookie(Session::getName(), API_DOCK_STORE_SESSION_A);
+
+    // Back on the first cookie the profile survived the other session's
+    // attempt to remove it.
+    $this->getJson('/api-dock/try-it/profiles')
+        ->assertOk()
+        ->assertJsonPath('profiles.0.id', $profileId);
+});
+
+it('does not let a second session use a profile id over http', function (): void {
+    $created = $this->postJson('/api-dock/try-it/profiles', [
+        'label' => 'Owned by the first visitor',
+        'credential' => API_DOCK_STORE_CREDENTIAL,
+    ]);
+
+    $created->assertCreated();
+
+    $profileId = (string) $created->json('profile.id');
+
+    // See the flushSession() comment above: the flush is a test-process
+    // artifact of reusing one Store across cookies, not something a real
+    // second browser needs.
+    $this->flushSession()->withUnencryptedCookie(Session::getName(), API_DOCK_STORE_SESSION_B);
 
     Http::fake();
 
@@ -403,7 +436,7 @@ it('does not let a second session use a profile id over http', function (): void
     // Back on A's cookie the profile is still there. Without this the two
     // assertions above would also hold if the cookie were ignored and every
     // request got its own random id — that would be isolation proven by nothing.
-    $this->withUnencryptedCookie(Session::getName(), API_DOCK_STORE_SESSION_A);
+    $this->flushSession()->withUnencryptedCookie(Session::getName(), API_DOCK_STORE_SESSION_A);
 
     $this->getJson('/api-dock/try-it/profiles')
         ->assertOk()
@@ -421,7 +454,7 @@ it('does not let a second session use a profile id over http', function (): void
 it('sends the credential upstream and nowhere else on the success path', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, [
+    $profile = $store->put([
         'scheme' => 'bearer',
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
@@ -451,7 +484,7 @@ it('sends the credential upstream and nowhere else on the success path', functio
 });
 
 it('does not leak the credential when the profile id is unknown', function (): void {
-    app(AuthProfileStore::class)->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
+    app(AuthProfileStore::class)->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
 
     Http::fake();
 
@@ -469,7 +502,7 @@ it('does not leak the credential when the profile id is unknown', function (): v
 });
 
 it('does not leak the credential while try-it is disabled', function (): void {
-    $profile = app(AuthProfileStore::class)->put(API_DOCK_STORE_SESSION_A, [
+    $profile = app(AuthProfileStore::class)->put([
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
 
@@ -497,7 +530,7 @@ it('does not leak the credential while try-it is disabled', function (): void {
 it('does not leak the credential when the guard refuses the target', function (): void {
     apiDockStoreResolvesTo(['169.254.169.254']);
 
-    $profile = app(AuthProfileStore::class)->put(API_DOCK_STORE_SESSION_A, [
+    $profile = app(AuthProfileStore::class)->put([
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
 
@@ -523,7 +556,7 @@ it('does not leak the credential when the guard refuses the target', function ()
 });
 
 it('does not leak the credential when the upstream transport fails', function (): void {
-    $profile = app(AuthProfileStore::class)->put(API_DOCK_STORE_SESSION_A, [
+    $profile = app(AuthProfileStore::class)->put([
         'credential' => API_DOCK_STORE_CREDENTIAL,
     ]);
 
@@ -560,14 +593,14 @@ it('does not leak the credential when the upstream transport fails', function ()
 it('does not leak the credential when the stored ciphertext cannot be decrypted', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
 
     /** @var array<string, array<string, mixed>> $entry */
-    $entry = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
+    $entry = session()->get(API_DOCK_STORE_SESSION_KEY);
     $entry[$profile['id']]['credential'] = 'not-a-valid-payload';
-    Cache::put(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A), $entry, 300);
+    session()->put(API_DOCK_STORE_SESSION_KEY, $entry);
 
-    expect($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))->toBeNull();
+    expect($store->revealCredentialForOutboundRequest($profile['id']))->toBeNull();
 
     Http::fake();
 
@@ -608,7 +641,7 @@ it('does not leak the credential through a store rejection message', function ()
         expect((string) $response->getContent())->not->toContain(API_DOCK_STORE_CREDENTIAL);
     }
 
-    expect($store->all(API_DOCK_STORE_SESSION_A))->toBe([]);
+    expect($store->all())->toBe([]);
 });
 
 it('removes the profile over http and stops honouring it', function (): void {
@@ -622,7 +655,7 @@ it('removes the profile over http and stops honouring it', function (): void {
 
     $this->deleteJson('/api-dock/try-it/profiles/'.$profileId)->assertNoContent();
 
-    expect(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeNull();
+    expect(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse();
 
     Http::fake();
 
@@ -646,7 +679,7 @@ it('round-trips server variables through every masked read path', function (): v
 
     $variables = ['region' => 'eu-west', 'api.version' => 'v2'];
 
-    $created = $store->put(API_DOCK_STORE_SESSION_A, [
+    $created = $store->put([
         'label' => 'Dummy profile',
         'scheme' => 'bearer',
         'credential' => API_DOCK_STORE_CREDENTIAL,
@@ -654,11 +687,11 @@ it('round-trips server variables through every masked read path', function (): v
     ]);
 
     /** @var array<string, array<string, mixed>> $entry */
-    $entry = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
+    $entry = session()->get(API_DOCK_STORE_SESSION_KEY);
     $ciphertext = (string) $entry[$created['id']]['credential'];
 
-    $found = $store->find(API_DOCK_STORE_SESSION_A, $created['id']);
-    $listed = $store->all(API_DOCK_STORE_SESSION_A);
+    $found = $store->find($created['id']);
+    $listed = $store->all();
 
     foreach ([$created, $found, $listed[0]] as $view) {
         $encoded = (string) json_encode($view);
@@ -687,7 +720,7 @@ it('keeps the credential out of both endpoints once a profile carries server var
         ->assertJsonPath('profile.server_variables', ['region' => 'eu-west', 'api.version' => 'v2']);
 
     /** @var array<string, array<string, mixed>> $entry */
-    $entry = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
+    $entry = session()->get(API_DOCK_STORE_SESSION_KEY);
     $ciphertext = (string) $entry[(string) $created->json('profile.id')]['credential'];
 
     $index = $this->getJson('/api-dock/try-it/profiles');
@@ -707,7 +740,7 @@ it('keeps the credential out of both endpoints once a profile carries server var
 it('drops the server variables the store cannot bound', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $created = $store->put(API_DOCK_STORE_SESSION_A, [
+    $created = $store->put([
         'credential' => API_DOCK_STORE_CREDENTIAL,
         'server_variables' => [
             '  region  ' => '  eu-west  ',
@@ -734,7 +767,7 @@ it('drops the server variables the store cannot bound', function (): void {
 it('caps how many server variables one profile can keep', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $created = $store->put(API_DOCK_STORE_SESSION_A, [
+    $created = $store->put([
         'credential' => API_DOCK_STORE_CREDENTIAL,
         'server_variables' => apiDockStoreVariableMap(AuthProfileStore::MAX_SERVER_VARIABLES * 2),
     ]);
@@ -757,7 +790,7 @@ it('refuses a malformed server variable map over http instead of dropping it sil
     // The rejected request carried the credential; nothing read out of it — the
     // offending name included — may be echoed back in the message.
     expect((string) $response->getContent())->not->toContain(API_DOCK_STORE_CREDENTIAL)
-        ->and($store->all(API_DOCK_STORE_SESSION_A))->toBe([]);
+        ->and($store->all())->toBe([]);
 })->with([
     'more entries than the cap' => [
         apiDockStoreVariableMap(AuthProfileStore::MAX_SERVER_VARIABLES + 1),
@@ -808,14 +841,14 @@ it('lists a profile written before server variables existed', function (): void 
 
     apiDockStoreSeedLegacyProfile('legacyid');
 
-    $found = $store->find(API_DOCK_STORE_SESSION_A, 'legacyid');
+    $found = $store->find('legacyid');
 
     expect($found)->not->toBeNull()
         ->and($found['server_variables'] ?? null)->toBe([])
         ->and(array_keys((array) $found))->toEqualCanonicalizing(API_DOCK_STORE_PROFILE_KEYS)
-        ->and($store->all(API_DOCK_STORE_SESSION_A)[0]['server_variables'])->toBe([])
+        ->and($store->all()[0]['server_variables'])->toBe([])
         // The record still decrypts: this is a missing key, not a broken profile.
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, 'legacyid'))
+        ->and($store->revealCredentialForOutboundRequest('legacyid'))
         ->toBe(API_DOCK_STORE_CREDENTIAL);
 
     $index = $this->getJson('/api-dock/try-it/profiles');
@@ -825,12 +858,12 @@ it('lists a profile written before server variables existed', function (): void 
     expect((string) $index->getContent())->not->toContain(API_DOCK_STORE_CREDENTIAL);
 });
 
-it('ignores a server variables value in the cache that is not a map', function (): void {
+it('ignores a server variables value in the session that is not a map', function (): void {
     $store = app(AuthProfileStore::class);
 
     apiDockStoreSeedLegacyProfile('poisonid', ['server_variables' => 'not-a-map']);
 
-    $found = $store->find(API_DOCK_STORE_SESSION_A, 'poisonid');
+    $found = $store->find('poisonid');
 
     expect($found['server_variables'] ?? null)->toBe([]);
 });
@@ -843,19 +876,19 @@ it('caps the profiles a session can keep once the record carries server variable
     $ids = [];
 
     for ($i = 0; $i < 5; $i++) {
-        $ids[] = $store->put(API_DOCK_STORE_SESSION_A, [
+        $ids[] = $store->put([
             'credential' => API_DOCK_STORE_CREDENTIAL,
             'server_variables' => ['region' => 'eu-west-'.$i],
         ])['id'];
     }
 
-    $listed = $store->all(API_DOCK_STORE_SESSION_A);
+    $listed = $store->all();
 
     // The surviving records keep their OWN maps: array_slice must carry the
     // values across, not just the ids.
     expect($listed)->toHaveCount(3)
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $ids[0]))->toBeNull()
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $ids[1]))->toBeNull()
+        ->and($store->find($ids[0]))->toBeNull()
+        ->and($store->find($ids[1]))->toBeNull()
         ->and(array_column($listed, 'server_variables'))->toBe([
             ['region' => 'eu-west-2'],
             ['region' => 'eu-west-3'],
@@ -865,135 +898,40 @@ it('caps the profiles a session can keep once the record carries server variable
 
 /*
 |--------------------------------------------------------------------------
-| Rolling lifetime — an idle ttl, not an absolute one
+| Lifetime — the session's own, no ttl of its own
 |--------------------------------------------------------------------------
 */
 
-it('defaults the credential lifetime to an hour', function (): void {
-    // The shipped value, not a test override: a silent drop back to the old
-    // five minutes is the regression this guards.
-    expect(config('api-dock.try_it.ttl'))->toBe(3600);
+it('ships without a try-it ttl key so the lifetime follows the session', function (): void {
+    // The shipped config, not a test override: the key is gone entirely, not
+    // merely unset, which is the regression this guards against — a config
+    // key left behind invites someone to wire it back up as a real ttl.
+    expect(config('api-dock.try_it'))->not->toHaveKey('ttl');
 });
 
-it('rolls the ttl forward on every read path', function (): void {
-    config()->set('api-dock.try_it.ttl', 60);
-
+it('keeps a profile alive across an arbitrary amount of travelled time, and flush is what finally clears it', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
 
-    foreach (['find', 'all', 'reveal'] as $path) {
-        $this->travel(45)->seconds();
+    // No ttl to outlive: a week is no different from a second to a store that
+    // has nothing of its own to expire. Dead under the old hard-coded hour,
+    // alive under the session's own lifetime.
+    $this->travel(7)->days();
 
-        match ($path) {
-            'find' => expect($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->not->toBeNull(),
-            'all' => expect($store->all(API_DOCK_STORE_SESSION_A))->toHaveCount(1),
-            default => expect($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))
-                ->toBe(API_DOCK_STORE_CREDENTIAL),
-        };
-    }
+    expect($store->find($profile['id']))->not->toBeNull()
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBe(API_DOCK_STORE_CREDENTIAL);
 
-    // 135 seconds of wall clock against a 60 second ttl: only a lifetime that
-    // each read pushes forward survives this.
-    $this->travel(45)->seconds();
+    $store->flush();
 
-    expect($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))
-        ->toBe(API_DOCK_STORE_CREDENTIAL);
-
-    // Left alone past one full window it still dies. Rolling is not immortal.
-    $this->travel(61)->seconds();
-
-    expect($store->all(API_DOCK_STORE_SESSION_A))->toBe([])
-        ->and($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->toBeNull()
-        ->and($store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']))->toBeNull()
-        ->and(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeNull();
+    expect($store->find($profile['id']))->toBeNull()
+        ->and($store->all())->toBe([]);
 });
-
-it('rolls the ttl forward over http as well', function (): void {
-    config()->set('api-dock.try_it.ttl', 60);
-
-    $created = $this->postJson('/api-dock/try-it/profiles', ['credential' => API_DOCK_STORE_CREDENTIAL]);
-
-    $created->assertCreated();
-
-    $profileId = (string) $created->json('profile.id');
-
-    for ($i = 0; $i < 3; $i++) {
-        $this->travel(45)->seconds();
-
-        $this->getJson('/api-dock/try-it/profiles')
-            ->assertOk()
-            ->assertJsonPath('profiles.0.id', $profileId);
-    }
-
-    $this->travel(61)->seconds();
-
-    $this->getJson('/api-dock/try-it/profiles')->assertOk()->assertJsonPath('profiles', []);
-});
-
-it('does not resurrect an expired bucket on any read path', function (): void {
-    config()->set('api-dock.try_it.ttl', 60);
-
-    $store = app(AuthProfileStore::class);
-
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
-
-    $this->travel(61)->seconds();
-
-    $store->all(API_DOCK_STORE_SESSION_A);
-    $store->find(API_DOCK_STORE_SESSION_A, $profile['id']);
-    $store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']);
-
-    // A refreshing read must never write a bucket back that had already gone.
-    expect(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBeNull();
-});
-
-it('re-puts the stored record byte for byte when a read rolls the ttl', function (): void {
-    $store = app(AuthProfileStore::class);
-
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, [
-        'credential' => API_DOCK_STORE_CREDENTIAL,
-        'server_variables' => ['region' => 'eu-west'],
-    ]);
-
-    $before = Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A));
-
-    $store->all(API_DOCK_STORE_SESSION_A);
-    $store->find(API_DOCK_STORE_SESSION_A, $profile['id']);
-    $store->revealCredentialForOutboundRequest(API_DOCK_STORE_SESSION_A, $profile['id']);
-
-    // Only the expiry moves. A refresh that re-encrypted, or that wrote back a
-    // decrypted value, would change this array.
-    expect(Cache::get(apiDockStoreCacheKey(API_DOCK_STORE_SESSION_A)))->toBe($before)
-        ->and(apiDockStoreRawEntry(API_DOCK_STORE_SESSION_A))->not->toContain(API_DOCK_STORE_CREDENTIAL);
-});
-
-it('falls back to the default lifetime when the configured ttl is unusable', function (mixed $ttl): void {
-    config()->set('api-dock.try_it.ttl', $ttl);
-
-    $store = app(AuthProfileStore::class);
-
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, ['credential' => API_DOCK_STORE_CREDENTIAL]);
-
-    $this->travel(3599)->seconds();
-
-    expect($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->not->toBeNull();
-
-    // Well past the window the read above rolled it to.
-    $this->travel(4000)->seconds();
-
-    expect($store->find(API_DOCK_STORE_SESSION_A, $profile['id']))->toBeNull();
-})->with([
-    'zero' => [0],
-    'negative' => [-5],
-    'not a number' => ['abc'],
-    'null' => [null],
-]);
 
 it('drops a server variable whose value is empty after trimming', function (): void {
     $store = app(AuthProfileStore::class);
 
-    $profile = $store->put(API_DOCK_STORE_SESSION_A, [
+    $profile = $store->put([
         'credential' => API_DOCK_STORE_CREDENTIAL,
         'server_variables' => ['tenant' => '  ', 'region' => 'eu-west'],
     ]);

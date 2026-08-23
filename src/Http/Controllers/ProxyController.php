@@ -187,19 +187,17 @@ final class ProxyController
      */
     private function applyProfile(array $headers, string $profileId): array|JsonResponse
     {
-        $sessionKey = self::sessionKey();
-
-        if ($sessionKey === null) {
+        if (! self::sessionStarted()) {
             return self::error('A session is required to use a stored try-it profile.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $profile = $this->profiles->find($sessionKey, $profileId);
+        $profile = $this->profiles->find($profileId);
 
         if ($profile === null) {
             return self::error('The requested try-it profile does not exist for this session.', Response::HTTP_NOT_FOUND);
         }
 
-        $credential = $this->profiles->revealCredentialForOutboundRequest($sessionKey, $profileId);
+        $credential = $this->profiles->revealCredentialForOutboundRequest($profileId);
 
         if ($credential === null) {
             return self::error('The stored try-it credential could not be read.', Response::HTTP_UNPROCESSABLE_ENTITY);
@@ -244,24 +242,18 @@ final class ProxyController
     /**
      * Fails closed on an unstarted session.
      *
-     * `Session::getId()` does NOT throw without StartSession — it answers with a
-     * process-scoped id. On a persistent worker every visitor would then share
-     * one credential bucket if an operator set `api-dock.middleware` to a stack
-     * without StartSession. Ownership comes from a real session or from nothing.
+     * Without StartSession there is no session to read a profile out of, and the
+     * facade would hand back a store nobody persists. An operator who sets
+     * `api-dock.middleware` to a stack without StartSession gets a refusal rather
+     * than a credential lookup against a throwaway store.
      */
-    private static function sessionKey(): ?string
+    private static function sessionStarted(): bool
     {
         try {
-            if (! Session::isStarted()) {
-                return null;
-            }
-
-            $id = Session::getId();
+            return Session::isStarted();
         } catch (Throwable) {
-            return null;
+            return false;
         }
-
-        return is_string($id) && $id !== '' ? $id : null;
     }
 
     private static function maxRequestBytes(): int
