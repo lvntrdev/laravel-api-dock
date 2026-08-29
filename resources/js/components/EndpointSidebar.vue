@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { openSettings, settingsOpen } from '@/lib/appView'
 import { t } from '@/lib/i18n'
@@ -24,6 +24,28 @@ const groups = computed(() => groupOperations(props.document, query.value))
 
 onMounted(() => window.addEventListener('keydown', focusSearch))
 onBeforeUnmount(() => window.removeEventListener('keydown', focusSearch))
+
+// The selected operation survives a reload through the URL hash, but the open
+// groups did not: the reader came back to their endpoint with the tree collapsed
+// around it and no way to see where they were. The group holding the selection
+// is therefore opened whenever that selection changes — including the first
+// render after a reload. Collapsing it by hand still works: this only fires on a
+// NEW selection, never on the toggle.
+watch(
+  () => [props.selectedKey, props.document] as const,
+  ([key, spec]) => {
+    if (key === undefined) {
+      return
+    }
+
+    for (const group of groupOperations(spec)) {
+      if (group.operations.some((entry) => entry.key === key)) {
+        expandedTags.value.add(group.tag)
+      }
+    }
+  },
+  { immediate: true },
+)
 
 function focusSearch(event: KeyboardEvent): void {
   if (event.key !== '/' || event.altKey || event.ctrlKey || event.metaKey) {
