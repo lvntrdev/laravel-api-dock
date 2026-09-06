@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { openSettings, settingsOpen } from '@/lib/appView'
 import { t } from '@/lib/i18n'
-import { groupOperations } from '@/lib/operations'
+import { groupOperations, groupOperationsByCategory } from '@/lib/operations'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
 
 const props = defineProps<{
@@ -20,7 +20,8 @@ const searchInput = ref<HTMLInputElement>()
 // Groups start closed. A spec with a dozen tags otherwise opens as a wall of
 // endpoints the reader has to scroll past to reach the tag they came for.
 const expandedTags = ref(new Set<string>())
-const groups = computed(() => groupOperations(props.document, query.value))
+const categories = computed(() => groupOperationsByCategory(props.document, query.value))
+const hasMatches = computed(() => categories.value.some((category) => category.groups.length > 0))
 
 onMounted(() => window.addEventListener('keydown', focusSearch))
 onBeforeUnmount(() => window.removeEventListener('keydown', focusSearch))
@@ -82,6 +83,10 @@ function toggleGroup(tag: string): void {
 function groupLabel(tag: string): string {
   return tag === 'Untagged' ? t('sidebar.untagged') : tag
 }
+
+function categoryLabel(name: string): string {
+  return name === '' ? t('sidebar.otherGroup') : name
+}
 </script>
 
 <template>
@@ -121,43 +126,53 @@ function groupLabel(tag: string): string {
     </div>
 
     <nav class="endpoint-sidebar__nav">
-      <section v-for="group in groups" :key="group.tag" class="operation-group">
-        <button
-          type="button"
-          class="operation-group__toggle"
-          :aria-expanded="isGroupOpen(group.tag)"
-          :aria-label="t(isGroupOpen(group.tag) ? 'sidebar.collapseGroup' : 'sidebar.expandGroup', { tag: groupLabel(group.tag) })"
-          @click="toggleGroup(group.tag)"
-        >
-          <i
-            class="pi"
-            :class="isGroupOpen(group.tag) ? 'pi-chevron-down' : 'pi-chevron-right'"
-            aria-hidden="true"
-          />
-          <span>{{ groupLabel(group.tag) }}</span>
-          <small>{{ group.operations.length }}</small>
-        </button>
+      <div
+        v-for="(category, index) in categories"
+        :key="category.name === null ? '__flat__' : `${category.name}-${index}`"
+        class="operation-category"
+      >
+        <h2 v-if="category.name !== null" class="operation-category__title ds-section-title">
+          {{ categoryLabel(category.name) }}
+        </h2>
 
-        <template v-if="isGroupOpen(group.tag)">
+        <section v-for="group in category.groups" :key="group.tag" class="operation-group">
           <button
-            v-for="entry in group.operations"
-            :key="entry.key"
             type="button"
-            class="operation-link"
-            :class="{ 'operation-link--active': entry.key === selectedKey }"
-            :aria-current="entry.key === selectedKey ? 'page' : undefined"
-            @click="emit('select', entry)"
+            class="operation-group__toggle"
+            :aria-expanded="isGroupOpen(group.tag)"
+            :aria-label="t(isGroupOpen(group.tag) ? 'sidebar.collapseGroup' : 'sidebar.expandGroup', { tag: groupLabel(group.tag) })"
+            @click="toggleGroup(group.tag)"
           >
-            <span class="operation-link__primary">
-              <span class="method-chip" :data-method="entry.method">{{ entry.method }}</span>
-              <strong>{{ entry.operation.summary || entry.path }}</strong>
-            </span>
-            <small>{{ entry.path }}</small>
+            <i
+              class="pi"
+              :class="isGroupOpen(group.tag) ? 'pi-chevron-down' : 'pi-chevron-right'"
+              aria-hidden="true"
+            />
+            <span>{{ groupLabel(group.tag) }}</span>
+            <small>{{ group.operations.length }}</small>
           </button>
-        </template>
-      </section>
 
-      <div v-if="groups.length === 0" class="sidebar-empty">
+          <template v-if="isGroupOpen(group.tag)">
+            <button
+              v-for="entry in group.operations"
+              :key="entry.key"
+              type="button"
+              class="operation-link"
+              :class="{ 'operation-link--active': entry.key === selectedKey }"
+              :aria-current="entry.key === selectedKey ? 'page' : undefined"
+              @click="emit('select', entry)"
+            >
+              <span class="operation-link__primary">
+                <span class="method-chip" :data-method="entry.method">{{ entry.method }}</span>
+                <strong>{{ entry.operation.summary || entry.path }}</strong>
+              </span>
+              <small>{{ entry.path }}</small>
+            </button>
+          </template>
+        </section>
+      </div>
+
+      <div v-if="!hasMatches" class="sidebar-empty">
         <i class="pi pi-search" aria-hidden="true" />
         <p>{{ t('sidebar.noMatches', { query }) }}</p>
       </div>

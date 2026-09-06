@@ -1,6 +1,7 @@
 import type {
   HttpMethod,
   OpenApiDocument,
+  OperationCategory,
   OperationEntry,
   OperationGroup,
   OperationObject,
@@ -83,6 +84,51 @@ export function groupOperations(
   return [...groups.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([tag, operations]) => ({ tag, operations }))
+}
+
+/**
+ * Groups tags into top-level categories via the spec's `x-tagGroups` (Redoc's
+ * convention). Without one, returns a single flat category — today's behaviour,
+ * no extra header. Tags an `x-tagGroups` entry doesn't claim land in a
+ * trailing '' category, rendered as "Other" by the sidebar.
+ */
+export function groupOperationsByCategory(
+  document: OpenApiDocument,
+  query = '',
+): OperationCategory[] {
+  const groups = groupOperations(document, query)
+  const tagGroups = document['x-tagGroups']
+
+  if (!Array.isArray(tagGroups) || tagGroups.length === 0) {
+    return [{ name: null, groups }]
+  }
+
+  const remaining = new Map(groups.map((group) => [group.tag, group]))
+  const categories: OperationCategory[] = []
+
+  for (const tagGroup of tagGroups) {
+    if (!tagGroup?.name || !Array.isArray(tagGroup.tags)) {
+      continue
+    }
+
+    const categoryGroups = tagGroup.tags
+      .map((tag) => remaining.get(tag))
+      .filter((group): group is OperationGroup => group !== undefined)
+
+    if (categoryGroups.length > 0) {
+      categories.push({ name: tagGroup.name, groups: categoryGroups })
+    }
+
+    for (const tag of tagGroup.tags) {
+      remaining.delete(tag)
+    }
+  }
+
+  if (remaining.size > 0) {
+    categories.push({ name: '', groups: [...remaining.values()] })
+  }
+
+  return categories
 }
 
 export function findOperation(

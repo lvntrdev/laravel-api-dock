@@ -443,6 +443,17 @@ kbd {
   scrollbar-width: thin;
 }
 
+.operation-category + .operation-category {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--sidebar-border, var(--surface-700));
+}
+
+.operation-category__title {
+  margin: 0 0 8px;
+  padding: 0 10px;
+}
+
 .operation-group + .operation-group {
   margin-top: 14px;
 }

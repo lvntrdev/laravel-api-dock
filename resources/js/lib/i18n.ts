@@ -24,6 +24,7 @@ export const en = {
   'sidebar.collapseGroup': 'Collapse {tag}',
   'sidebar.openapiVersion': 'OpenAPI {version}',
   'sidebar.untagged': 'Untagged',
+  'sidebar.otherGroup': 'Other',
   'sidebar.unversioned': 'unversioned',
 
   // Application shell
@@ -279,6 +280,7 @@ export const tr: Record<MessageKey, string> = {
   'sidebar.collapseGroup': '{tag} grubunu daralt',
   'sidebar.openapiVersion': 'OpenAPI {version}',
   'sidebar.untagged': 'Etiketsiz',
+  'sidebar.otherGroup': 'Diğer',
   'sidebar.unversioned': 'sürümsüz',
 
   // Application shell

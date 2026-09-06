@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { groupOperations } from '@/lib/operations'
+import { groupOperations, groupOperationsByCategory } from '@/lib/operations'
 import type { OpenApiDocument } from '@/types/openapi'
 
 const document: OpenApiDocument = {
@@ -48,5 +48,39 @@ describe('groupOperations', () => {
     expect(groupOperations(document, '/health')[0].tag).toBe('Untagged')
     expect(groupOperations(document, 'listUsers')[0].operations).toHaveLength(1)
     expect(groupOperations(document, 'missing')).toEqual([])
+  })
+})
+
+describe('groupOperationsByCategory', () => {
+  it('returns one unnamed category when the spec has no x-tagGroups', () => {
+    const categories = groupOperationsByCategory(document)
+
+    expect(categories).toHaveLength(1)
+    expect(categories[0].name).toBeNull()
+    expect(categories[0].groups.map((group) => group.tag)).toEqual(['Admin', 'Untagged', 'Users'])
+  })
+
+  it('buckets tags under x-tagGroups and puts leftovers under an empty-name "Other" category', () => {
+    const grouped: OpenApiDocument = {
+      ...document,
+      'x-tagGroups': [{ name: 'Web API', tags: ['Users'] }],
+    }
+
+    const categories = groupOperationsByCategory(grouped)
+
+    expect(categories.map((category) => category.name)).toEqual(['Web API', ''])
+    expect(categories[0].groups.map((group) => group.tag)).toEqual(['Users'])
+    expect(categories[1].groups.map((group) => group.tag)).toEqual(['Admin', 'Untagged'])
+  })
+
+  it('drops an x-tagGroups entry that matches no operation', () => {
+    const grouped: OpenApiDocument = {
+      ...document,
+      'x-tagGroups': [{ name: 'Mobile API', tags: ['DoesNotExist'] }],
+    }
+
+    const categories = groupOperationsByCategory(grouped)
+
+    expect(categories.map((category) => category.name)).toEqual([''])
   })
 })

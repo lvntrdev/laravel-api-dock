@@ -139,7 +139,14 @@ export interface OpenApiDocument {
     [key: string]: unknown
   }
   tags?: Array<{ name: string; description?: string }>
+  'x-tagGroups'?: TagGroupObject[]
   [key: string]: unknown
+}
+
+/** Redoc's `x-tagGroups` convention: buckets tags under a top-level category (e.g. "Web API"). */
+export interface TagGroupObject {
+  name: string
+  tags: string[]
 }
 
 export interface OperationEntry {
@@ -153,4 +160,11 @@ export interface OperationEntry {
 export interface OperationGroup {
   tag: string
   operations: OperationEntry[]
+}
+
+export interface OperationCategory {
+  // null: no `x-tagGroups` defined, render flat (today's behaviour).
+  // '': tags left over that no `x-tagGroups` entry claimed — rendered under an "Other" heading.
+  name: string | null
+  groups: OperationGroup[]
 }
