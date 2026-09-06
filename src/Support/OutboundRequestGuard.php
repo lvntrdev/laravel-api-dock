@@ -279,7 +279,8 @@ final class OutboundRequestGuard
         // on it. Making an operator allowlist their own site to try their own
         // endpoints was ceremony that protected nobody, so this is implicit and
         // not configurable away.
-        $isSelf = self::isSelfHost($host);
+        $self = self::matchSelfHost($host);
+        $isSelf = $self['matched'];
 
         if (! $isSelf) {
             self::assertHostIsNotInternal($host);
@@ -296,7 +297,22 @@ final class OutboundRequestGuard
         // The host allowlist alone is not enough: an allowlisted host usually
         // co-locates internal services, so an unconstrained port turns one
         // allowed name into a port scanner (`https://api.example.com:6379/`).
-        if (! in_array($port, self::allowedPorts(), true)) {
+        $allowedPorts = self::allowedPorts();
+
+        // On a self host the port check is the ONLY boundary still standing —
+        // the allowlist and the address-class gate are bypassed there already —
+        // so it is narrowed to the port this application was configured to
+        // answer on, never dropped. Without it a stack served from
+        // `http://localhost:8000` could not reach its own documented API unless
+        // the operator put 8000 in `allowed_ports`, which would have opened that
+        // port on every allowlisted FOREIGN host as well. The port comes from
+        // the entry that matched (`app.url`/`self_hosts`), so it applies to that
+        // host alone and a foreign target still meets the unchanged list.
+        if ($isSelf && $self['ports'] !== []) {
+            $allowedPorts = array_merge($allowedPorts, $self['ports']);
+        }
+
+        if (! in_array($port, $allowedPorts, true)) {
             self::deny('The target port is not allowed.');
         }
 
@@ -574,7 +590,8 @@ final class OutboundRequestGuard
     }
 
     /**
-     * True when the target names this very application.
+     * Match the target against the names of this very application, and collect
+     * the ports those matching names were declared on.
      *
      * The match runs in ONE direction only: the target may BE a self host or a
      * subdomain of one, never its parent. The reverse form once counted
@@ -583,17 +600,30 @@ final class OutboundRequestGuard
      * included.
      *
      * What counts as self comes from {@see selfHosts()} — server config, never
-     * the request.
+     * the request. A port travels with the entry that declared it and is
+     * returned only for a host that entry matched, so one self host never lends
+     * its port to another.
+     *
+     * @return array{matched: bool, ports: list<int>}
      */
-    private static function isSelfHost(string $host): bool
+    private static function matchSelfHost(string $host): array
     {
+        $matched = false;
+        $ports = [];
+
         foreach (self::selfHosts() as $self) {
-            if ($host === $self || str_ends_with($host, '.'.$self)) {
-                return true;
+            if ($host !== $self['host'] && ! str_ends_with($host, '.'.$self['host'])) {
+                continue;
+            }
+
+            $matched = true;
+
+            if ($self['port'] !== null) {
+                $ports[] = $self['port'];
             }
         }
 
-        return false;
+        return ['matched' => $matched, 'ports' => array_values(array_unique($ports))];
     }
 
     /**
@@ -610,7 +640,11 @@ final class OutboundRequestGuard
      * A malformed entry is skipped silently rather than denied: this is operator
      * configuration, not user input, and one typo must not take try-it down.
      *
-     * @return list<string>
+     * Each name carries the port it was declared on, or null when it named none.
+     * That port is the one thing {@see inspect()} widens for a self host, so it
+     * is read from this same server-side config and never from the request.
+     *
+     * @return list<array{host: string, port: int|null}>
      */
     private static function selfHosts(): array
     {
@@ -620,10 +654,18 @@ final class OutboundRequestGuard
         $appUrl = config('app.url');
 
         if (is_string($appUrl) && $appUrl !== '') {
-            $parsed = parse_url($appUrl, PHP_URL_HOST);
+            $parsed = parse_url($appUrl);
+            $parsed = is_array($parsed) ? $parsed : [];
+            $host = isset($parsed['host']) ? strtolower(rtrim((string) $parsed['host'], '.')) : '';
 
-            if (is_string($parsed) && $parsed !== '') {
-                $hosts[] = strtolower(rtrim($parsed, '.'));
+            if ($host !== '') {
+                // Only an EXPLICIT port counts. Inferring 80/443 from the scheme
+                // would hand back the two ports an operator who narrowed
+                // `allowed_ports` had just removed.
+                $hosts[] = [
+                    'host' => $host,
+                    'port' => isset($parsed['port']) ? self::normalisedPort((int) $parsed['port']) : null,
+                ];
             }
         }
 
@@ -637,6 +679,26 @@ final class OutboundRequestGuard
             }
 
             $entry = strtolower(trim(rtrim(trim($entry), '.')));
+            $port = null;
+
+            // `host:port` is the only decoration this list accepts, and the port
+            // is split off BEFORE every check below rather than after, so what
+            // those checks see is the bare hostname they were written against.
+            // The pattern refuses a second colon on purpose: an address literal
+            // (`[::1]:8000`, `::1`) or a full URL therefore never matches it,
+            // reaches the checks intact, and is rejected there as it always was.
+            if (preg_match('/^(?<host>[^:]+):(?<port>\d{1,5})$/', $entry, $matches) === 1) {
+                $port = self::normalisedPort((int) $matches['port']);
+
+                // An out-of-range port is not read as "no port": that would
+                // promote the host of a typo'd entry to a self host, which is a
+                // trust decision, and the entry is skipped entirely today.
+                if ($port === null) {
+                    continue;
+                }
+
+                $entry = $matches['host'];
+            }
 
             // Same hostname shape {@see inspect()} demands of a target, plus the
             // IP check {@see inspect()} performs BEFORE that pattern — on its own
@@ -665,10 +727,24 @@ final class OutboundRequestGuard
                 continue;
             }
 
-            $hosts[] = $entry;
+            $hosts[] = ['host' => $entry, 'port' => $port];
         }
 
-        return array_values(array_unique(array_filter($hosts)));
+        $unique = [];
+
+        foreach ($hosts as $self) {
+            $unique[$self['host'].':'.($self['port'] ?? '')] = $self;
+        }
+
+        return array_values($unique);
+    }
+
+    /**
+     * A port number, or null when the value is not one a target could carry.
+     */
+    private static function normalisedPort(int $port): ?int
+    {
+        return ($port >= 1 && $port <= 65535) ? $port : null;
     }
 
     private static function assertHostIsNotInternal(string $host): void

@@ -172,7 +172,7 @@ The document is the source of truth, not the source file — check what actually
 came out:
 
 ```bash
-php artisan api-dock:export --format=llms   # the agent-facing bundle
+php artisan api-dock:export --llms          # the agent-facing bundle
 php artisan api-dock:diff                   # what changed against the stored snapshot
 ```
 

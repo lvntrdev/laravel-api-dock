@@ -8,30 +8,19 @@ use JsonException;
 
 final readonly class LlmsTxtExporter
 {
-    /** @var list<string> */
-    private const HTTP_METHODS = [
-        'get',
-        'put',
-        'post',
-        'delete',
-        'options',
-        'head',
-        'patch',
-        'trace',
-    ];
-
     /**
-     * @param  array<string, mixed>  $document
+     * @param  array<array-key, mixed>  $document
      *
      * @throws JsonException
      */
     public function export(array $document): string
     {
-        $info = $this->stringMap($document['info'] ?? null);
-        $title = $this->stringValue($info['title'] ?? null) ?? 'API';
-        $version = $this->stringValue($info['version'] ?? null);
+        $spec = new SpecReader($document);
+        $info = SpecReader::objectMap($document['info'] ?? null);
+        $title = SpecReader::nonEmptyString($info['title'] ?? null) ?? 'API';
+        $version = SpecReader::nonEmptyString($info['version'] ?? null);
         $lines = ['# '.$title.($version !== null ? ' ('.$version.')' : '')];
-        $description = $this->stringValue($info['description'] ?? null);
+        $description = SpecReader::nonEmptyString($info['description'] ?? null);
 
         if ($description !== null) {
             $lines[] = '';
@@ -41,7 +30,7 @@ final readonly class LlmsTxtExporter
         $grouped = [];
         $untagged = [];
 
-        foreach ($this->operations($document) as $operationData) {
+        foreach ($spec->operations() as $operationData) {
             $tag = $this->firstTag($operationData['operation']);
 
             if ($tag === null) {
@@ -55,50 +44,14 @@ final readonly class LlmsTxtExporter
         }
 
         foreach ($grouped as $tag => $operations) {
-            $this->appendGroup($lines, $tag, $operations);
+            $this->appendGroup($lines, $spec, (string) $tag, $operations);
         }
 
         if ($untagged !== []) {
-            $this->appendGroup($lines, 'Untagged', $untagged);
+            $this->appendGroup($lines, $spec, 'Untagged', $untagged);
         }
 
         return implode("\n", $lines)."\n";
-    }
-
-    /**
-     * @param  array<string, mixed>  $document
-     * @return list<array{
-     *     path: string,
-     *     method: string,
-     *     operation: array<string, mixed>,
-     *     pathParameters: list<mixed>
-     * }>
-     */
-    private function operations(array $document): array
-    {
-        $operations = [];
-
-        foreach ($this->stringMap($document['paths'] ?? null) as $path => $pathItemValue) {
-            $pathItem = $this->stringMap($pathItemValue);
-            $pathParameters = $this->listValue($pathItem['parameters'] ?? null);
-
-            foreach ($pathItem as $method => $operationValue) {
-                if (! in_array($method, self::HTTP_METHODS, true) || ! is_array($operationValue)) {
-                    continue;
-                }
-
-                $operation = $this->stringMap($operationValue);
-
-                $operations[] = [
-                    'path' => $path,
-                    'method' => $method,
-                    'operation' => $operation,
-                    'pathParameters' => $pathParameters,
-                ];
-            }
-        }
-
-        return $operations;
     }
 
     /**
@@ -106,19 +59,19 @@ final readonly class LlmsTxtExporter
      * @param  list<array{
      *     path: string,
      *     method: string,
-     *     operation: array<string, mixed>,
+     *     operation: array<array-key, mixed>,
      *     pathParameters: list<mixed>
      * }>  $operations
      *
      * @throws JsonException
      */
-    private function appendGroup(array &$lines, string $tag, array $operations): void
+    private function appendGroup(array &$lines, SpecReader $spec, string $tag, array $operations): void
     {
         $lines[] = '';
         $lines[] = '## '.$tag;
 
         foreach ($operations as $operationData) {
-            $this->appendOperation($lines, $operationData);
+            $this->appendOperation($lines, $spec, $operationData);
         }
     }
 
@@ -127,25 +80,25 @@ final readonly class LlmsTxtExporter
      * @param  array{
      *     path: string,
      *     method: string,
-     *     operation: array<string, mixed>,
+     *     operation: array<array-key, mixed>,
      *     pathParameters: list<mixed>
      * }  $operationData
      *
      * @throws JsonException
      */
-    private function appendOperation(array &$lines, array $operationData): void
+    private function appendOperation(array &$lines, SpecReader $spec, array $operationData): void
     {
         $operation = $operationData['operation'];
         $lines[] = '';
         $lines[] = '### '.strtoupper($operationData['method']).' '.$operationData['path'];
-        $summary = $this->stringValue($operation['summary'] ?? null);
+        $summary = SpecReader::nonEmptyString($operation['summary'] ?? null);
 
         if ($summary !== null) {
             $lines[] = '';
             $lines[] = $summary;
         }
 
-        $hint = $this->stringValue($operation['x-ai-hint'] ?? null);
+        $hint = SpecReader::nonEmptyString($operation['x-ai-hint'] ?? null);
 
         if ($hint !== null) {
             $lines[] = '';
@@ -154,8 +107,8 @@ final readonly class LlmsTxtExporter
 
         $this->appendPitfalls($lines, $operation);
 
-        $features = $this->stringMap($operation['x-api-dock-features'] ?? null);
-        $scopes = $this->stringList($features['scopes'] ?? null);
+        $features = SpecReader::objectMap($operation['x-api-dock-features'] ?? null);
+        $scopes = SpecReader::stringList($features['scopes'] ?? null);
         $lines[] = '';
         $lines[] = $this->authenticationLine($features['auth'] ?? null, $scopes);
 
@@ -165,10 +118,11 @@ final readonly class LlmsTxtExporter
 
         $this->appendParameters(
             $lines,
-            [...$operationData['pathParameters'], ...$this->listValue($operation['parameters'] ?? null)],
+            $spec,
+            [...$operationData['pathParameters'], ...SpecReader::listValue($operation['parameters'] ?? null)],
         );
-        $this->appendRequestBody($lines, $operation);
-        $this->appendResponses($lines, $operation);
+        $this->appendRequestBody($lines, $spec, $operation);
+        $this->appendResponses($lines, $spec, $operation);
 
         if (config('api-dock.ai.include_examples', true) === true) {
             $this->appendExamples($lines, $operation);
@@ -179,15 +133,15 @@ final readonly class LlmsTxtExporter
 
     /**
      * @param  list<string>  $lines
-     * @param  array<string, mixed>  $operation
+     * @param  array<array-key, mixed>  $operation
      */
     private function appendPitfalls(array &$lines, array $operation): void
     {
         $pitfalls = [];
 
-        foreach ($this->listValue($operation['x-ai-pitfalls'] ?? null) as $pitfallValue) {
-            $pitfall = $this->stringMap($pitfallValue);
-            $text = $this->stringValue($pitfall['text'] ?? null);
+        foreach (SpecReader::listValue($operation['x-ai-pitfalls'] ?? null) as $pitfallValue) {
+            $pitfall = SpecReader::objectMap($pitfallValue);
+            $text = SpecReader::nonEmptyString($pitfall['text'] ?? null);
 
             if ($text !== null) {
                 $pitfalls[] = $text;
@@ -208,23 +162,28 @@ final readonly class LlmsTxtExporter
     }
 
     /**
+     * A parameter is resolved before it is read: a `#/components/parameters/…`
+     * entry carries its `name` and `in` on the target, and the unresolved node
+     * has neither — the row was skipped and an operation whose inputs are all
+     * referenced printed "No parameters." to the model.
+     *
      * @param  list<string>  $lines
      * @param  list<mixed>  $parameters
      */
-    private function appendParameters(array &$lines, array $parameters): void
+    private function appendParameters(array &$lines, SpecReader $spec, array $parameters): void
     {
         $rows = [];
 
         foreach ($parameters as $parameterValue) {
-            $parameter = $this->stringMap($parameterValue);
-            $name = $this->stringValue($parameter['name'] ?? null);
-            $location = $this->stringValue($parameter['in'] ?? null);
+            $parameter = $spec->resolveObject($parameterValue);
+            $name = SpecReader::nonEmptyString($parameter['name'] ?? null);
+            $location = SpecReader::nonEmptyString($parameter['in'] ?? null);
 
             if ($name === null || $location === null) {
                 continue;
             }
 
-            $schema = $this->stringMap($parameter['schema'] ?? null);
+            $schema = SpecReader::objectMap($parameter['schema'] ?? null);
             // Keyed by (name, in): OpenAPI 3.1 §4.8.9 says an operation-level
             // parameter REPLACES the path-item one it shares an identity with.
             // The caller passes path-item parameters first, so a later write
@@ -258,16 +217,16 @@ final readonly class LlmsTxtExporter
 
     /**
      * @param  list<string>  $lines
-     * @param  array<string, mixed>  $operation
+     * @param  array<array-key, mixed>  $operation
      *
      * @throws JsonException
      */
-    private function appendRequestBody(array &$lines, array $operation): void
+    private function appendRequestBody(array &$lines, SpecReader $spec, array $operation): void
     {
-        $requestBody = $this->stringMap($operation['requestBody'] ?? null);
-        $content = $this->stringMap($requestBody['content'] ?? null);
-        $mediaType = $this->stringMap($content['application/json'] ?? null);
-        $schema = $this->stringMap($mediaType['schema'] ?? null);
+        $requestBody = $spec->resolveObject($operation['requestBody'] ?? null);
+        $content = SpecReader::objectMap($requestBody['content'] ?? null);
+        $mediaType = SpecReader::objectMap($content['application/json'] ?? null);
+        $schema = SpecReader::objectMap($mediaType['schema'] ?? null);
 
         $lines[] = '';
         $lines[] = '#### Request Body';
@@ -284,15 +243,15 @@ final readonly class LlmsTxtExporter
 
     /**
      * @param  list<string>  $lines
-     * @param  array<string, mixed>  $operation
+     * @param  array<array-key, mixed>  $operation
      *
      * @throws JsonException
      */
-    private function appendResponses(array &$lines, array $operation): void
+    private function appendResponses(array &$lines, SpecReader $spec, array $operation): void
     {
         $lines[] = '';
         $lines[] = '#### Responses';
-        $responses = $this->responseMap($operation['responses'] ?? null);
+        $responses = SpecReader::objectMap($operation['responses'] ?? null);
 
         if ($responses === []) {
             $lines[] = '';
@@ -302,19 +261,22 @@ final readonly class LlmsTxtExporter
         }
 
         foreach ($responses as $status => $responseValue) {
-            $response = $this->stringMap($responseValue);
+            // The response object, its media type and its schema are all
+            // resolved: an unresolved node used to be printed verbatim, handing
+            // the model a `{"$ref": "…"}` block with no shape in it.
+            $response = $spec->resolveObject($responseValue);
             $lines[] = '';
             $lines[] = '##### '.$status;
-            $responseDescription = $this->stringValue($response['description'] ?? null);
+            $responseDescription = SpecReader::nonEmptyString($response['description'] ?? null);
 
             if ($responseDescription !== null) {
                 $lines[] = '';
                 $lines[] = $responseDescription;
             }
 
-            $content = $this->stringMap($response['content'] ?? null);
-            $mediaType = $this->stringMap($content['application/json'] ?? null);
-            $schema = $this->stringMap($mediaType['schema'] ?? null);
+            $content = SpecReader::objectMap($response['content'] ?? null);
+            $mediaType = SpecReader::objectMap($content['application/json'] ?? null);
+            $schema = SpecReader::objectMap($mediaType['schema'] ?? null);
             $lines[] = '';
 
             if ($schema === []) {
@@ -329,13 +291,13 @@ final readonly class LlmsTxtExporter
 
     /**
      * @param  list<string>  $lines
-     * @param  array<string, mixed>  $operation
+     * @param  array<array-key, mixed>  $operation
      *
      * @throws JsonException
      */
     private function appendExamples(array &$lines, array $operation): void
     {
-        $examples = $this->listValue($operation['x-ai-examples'] ?? null);
+        $examples = SpecReader::listValue($operation['x-ai-examples'] ?? null);
 
         if ($examples === []) {
             return;
@@ -345,8 +307,8 @@ final readonly class LlmsTxtExporter
         $lines[] = '#### Examples';
 
         foreach ($examples as $exampleValue) {
-            $example = $this->stringMap($exampleValue);
-            $name = $this->stringValue($example['name'] ?? null);
+            $example = SpecReader::objectMap($exampleValue);
+            $name = SpecReader::nonEmptyString($example['name'] ?? null);
 
             if ($name === null) {
                 continue;
@@ -367,16 +329,16 @@ final readonly class LlmsTxtExporter
 
     /**
      * @param  list<string>  $lines
-     * @param  array<string, mixed>  $operation
+     * @param  array<array-key, mixed>  $operation
      */
     private function appendChangelog(array &$lines, array $operation): void
     {
         $entries = [];
 
-        foreach ($this->listValue($operation['x-api-dock-changelog'] ?? null) as $entryValue) {
-            $entry = $this->stringMap($entryValue);
-            $date = $this->stringValue($entry['date'] ?? null);
-            $summary = $this->stringValue($entry['summary'] ?? null);
+        foreach (SpecReader::listValue($operation['x-api-dock-changelog'] ?? null) as $entryValue) {
+            $entry = SpecReader::objectMap($entryValue);
+            $date = SpecReader::nonEmptyString($entry['date'] ?? null);
+            $summary = SpecReader::nonEmptyString($entry['summary'] ?? null);
 
             if ($date === null || $summary === null) {
                 continue;
@@ -407,6 +369,9 @@ final readonly class LlmsTxtExporter
     private function appendJson(array &$lines, array $value): void
     {
         $lines[] = '```json';
+        // Not forced into an object: an example payload is legitimately a JSON
+        // array. A schema reaches this method non-empty, and a nested empty one
+        // is already an object from the resolver.
         $lines[] = json_encode(
             $value,
             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
@@ -425,7 +390,7 @@ final readonly class LlmsTxtExporter
      */
     private function authenticationLine(mixed $auth, array $scopes): string
     {
-        $scheme = $this->stringValue($auth);
+        $scheme = SpecReader::nonEmptyString($auth);
         $required = $auth === true || $scheme !== null;
 
         if (! $required) {
@@ -437,15 +402,15 @@ final readonly class LlmsTxtExporter
         return $scopes === [] ? $line : $line.' (scopes: '.implode(', ', $scopes).')';
     }
 
-    /** @param array<string, mixed> $operation */
+    /** @param array<array-key, mixed> $operation */
     private function firstTag(array $operation): ?string
     {
-        $tags = $this->stringList($operation['tags'] ?? null);
+        $tags = SpecReader::stringList($operation['tags'] ?? null);
 
         return $tags[0] ?? null;
     }
 
-    /** @param array<string, mixed> $schema */
+    /** @param array<array-key, mixed> $schema */
     private function schemaType(array $schema): string
     {
         $type = $schema['type'] ?? null;
@@ -476,64 +441,9 @@ final readonly class LlmsTxtExporter
         return str_replace('|', '\\|', str_replace(["\r", "\n"], ' ', $value));
     }
 
-    private function stringValue(mixed $value): ?string
-    {
-        return is_string($value) && $value !== '' ? $value : null;
-    }
-
-    /** @return array<string, mixed> */
-    private function stringMap(mixed $value): array
-    {
-        if (! is_array($value)) {
-            return [];
-        }
-
-        $map = [];
-
-        foreach ($value as $key => $item) {
-            if (is_string($key)) {
-                $map[$key] = $item;
-            }
-        }
-
-        return $map;
-    }
-
-    /** @return array<string, mixed> */
-    private function responseMap(mixed $value): array
-    {
-        if (! is_array($value)) {
-            return [];
-        }
-
-        $responses = [];
-
-        foreach ($value as $status => $response) {
-            $responses[(string) $status] = $response;
-        }
-
-        return $responses;
-    }
-
     /** @return array<array-key, mixed> */
     private function arrayValue(mixed $value): array
     {
         return is_array($value) ? $value : [];
-    }
-
-    /** @return list<mixed> */
-    private function listValue(mixed $value): array
-    {
-        return is_array($value) && array_is_list($value) ? $value : [];
-    }
-
-    /** @return list<string> */
-    private function stringList(mixed $value): array
-    {
-        if (! is_array($value) || ! array_is_list($value)) {
-            return [];
-        }
-
-        return array_values(array_filter($value, is_string(...)));
     }
 }

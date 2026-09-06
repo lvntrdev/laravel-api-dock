@@ -43,7 +43,7 @@ final class ApiDockTransformer
     {
         $metadata = ['version' => ApiDockServiceProvider::version()];
 
-        // Off by default on purpose: Task 3's snapshot needs two consecutive
+        // Off by default on purpose: the snapshot diff needs two consecutive
         // generations of an unchanged API to be byte-identical.
         if (config('api-dock.include_generation_timestamp', false) === true) {
             $metadata['generated_at'] = (new DateTimeImmutable)->format(DATE_ATOM);

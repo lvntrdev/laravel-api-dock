@@ -518,6 +518,197 @@ it('never lets a leading dot entry be satisfied by a near miss', function (strin
 
 /*
 |--------------------------------------------------------------------------
+| Ports
+|--------------------------------------------------------------------------
+|
+| On a self host the port is the LAST boundary standing: the allowlist, the
+| internal-host list and the post-DNS address gate are all bypassed there. So
+| every case below pairs the widening with its negative — the same host on
+| another port, and a foreign host on the same port — because a port rule that
+| leaks off the self host turns this guard into a port scanner.
+|
+*/
+
+it('reaches the application own host on the port app url names', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'http://congress-app.test:8000');
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    // `php artisan serve`, Sail, a Docker port mapping: the app answers on a
+    // port no allowlist mentions, and it is its own documented API.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://congress-app.test:8000/api/things',
+    ])->assertOk()->assertJsonPath('status', 200);
+
+    Http::assertSent(static fn (ClientRequest $request): bool => $request->url() === 'http://congress-app.test:8000/api/things');
+});
+
+it('reaches a subdomain of the application host on the port app url names', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'http://congress-app.test:8000');
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    // The port follows the entry, and the entry already covers its subdomains.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://test-kurum.congress-app.test:8000/api/things',
+    ])->assertOk();
+});
+
+it('denies the application own host on a port nothing declared', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'http://congress-app.test:8000');
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake();
+
+    // Being self buys exactly ONE port. Redis on the same box is still off
+    // limits, which is the whole reason the check is narrowed and not removed.
+    $response = $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://congress-app.test:6379/',
+    ]);
+
+    $response->assertStatus(422);
+
+    expect((string) $response->json('message'))->toContain('port');
+
+    Http::assertNothingSent();
+});
+
+it('does not lend the application own port to a foreign host', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', ['api.example.com']);
+    config()->set('app.url', 'http://congress-app.test:8000');
+
+    Http::fake();
+
+    // The derived port is bound to the self match. An allowlisted foreign host
+    // meets the unchanged `allowed_ports`, so the widening cannot be borrowed.
+    $response = $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://api.example.com:8000/things',
+    ]);
+
+    $response->assertStatus(422);
+
+    expect((string) $response->json('message'))->toContain('port');
+
+    Http::assertNothingSent();
+});
+
+it('changes nothing when app url carries no explicit port', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake();
+
+    // No port is inferred from the scheme: an operator who narrowed
+    // `allowed_ports` does not get 80/443 handed back through this path.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://congress-app.test:8000/api/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+});
+
+it('reaches a self hosts entry on the port that entry declares', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+    config()->set('api-dock.try_it.self_hosts', ['ikinci-alan.test:8080']);
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://ikinci-alan.test:8080/api/things',
+    ])->assertOk()->assertJsonPath('status', 200);
+
+    Http::assertSent(static fn (ClientRequest $request): bool => $request->url() === 'http://ikinci-alan.test:8080/api/things');
+});
+
+it('does not let one self host use the port another self host declared', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'http://congress-app.test:8000');
+    config()->set('api-dock.try_it.self_hosts', ['ikinci-alan.test:8080']);
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake();
+
+    // Both names are self, but the ports are not pooled: each port reaches only
+    // the name it was declared with.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://ikinci-alan.test:8000/api/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+});
+
+it('ignores a self hosts entry whose port is out of range', function (string $entry): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+    config()->set('api-dock.try_it.self_hosts', [$entry]);
+
+    apiDockSecurityResolvesTo(['127.0.0.1']);
+
+    Http::fake();
+
+    // A malformed port drops the whole entry rather than being read as "no
+    // port": promoting a typo'd line to a self host would exempt that name from
+    // the allowlist and the address gate on the strength of a mistake.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://ikinci-alan.test/api/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+})->with([
+    'zero' => 'ikinci-alan.test:0',
+    'above the 16-bit range' => 'ikinci-alan.test:99999',
+]);
+
+it('still ignores an address literal in a self hosts entry that carries a port', function (string $entry): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+    config()->set('api-dock.try_it.self_hosts', [$entry.':8080']);
+
+    apiDockSecurityResolvesToItself();
+
+    Http::fake();
+
+    // Splitting the port off must not let a spelling past the checks that
+    // rejected it before: the metadata endpoint stays unreachable whether or
+    // not the entry that names it carries a port.
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://'.$entry.':8080/latest/meta-data/',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+})->with([
+    'canonical quad' => '169.254.169.254',
+    'loopback quad' => '127.0.0.1',
+    'dotted short form' => '127.1',
+    'decimal integer' => '2130706433',
+    'hexadecimal' => '0x7f000001',
+]);
+
+/*
+|--------------------------------------------------------------------------
 | Response handling
 |--------------------------------------------------------------------------
 */

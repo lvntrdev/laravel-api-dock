@@ -129,6 +129,95 @@ it('renders one row per parameter when an operation overrides a path item parame
         ->and($output)->toContain('| id | path | yes | integer |');
 });
 
+it('renders a referenced parameter and a referenced response schema as resolved shapes', function (): void {
+    $document = llmsExporterDocument([
+        '/reports/{reportId}' => [
+            'get' => [
+                'summary' => 'Show report',
+                'parameters' => [['$ref' => '#/components/parameters/ReportId']],
+                'requestBody' => ['$ref' => '#/components/requestBodies/ReportFilter'],
+                'responses' => [
+                    '200' => [
+                        'description' => 'OK',
+                        'content' => [
+                            'application/json' => ['schema' => ['$ref' => '#/components/schemas/Report']],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    ]);
+    $document['components'] = [
+        'parameters' => [
+            'ReportId' => [
+                'name' => 'reportId',
+                'in' => 'path',
+                'required' => true,
+                'schema' => ['$ref' => '#/components/schemas/Identifier'],
+            ],
+        ],
+        'requestBodies' => [
+            'ReportFilter' => [
+                'content' => [
+                    'application/json' => [
+                        'schema' => [
+                            'type' => 'object',
+                            'properties' => ['since' => ['type' => 'string', 'format' => 'date']],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+        'schemas' => [
+            'Identifier' => ['type' => 'string', 'format' => 'uuid'],
+            'Report' => [
+                'type' => 'object',
+                'properties' => [
+                    'id' => ['$ref' => '#/components/schemas/Identifier'],
+                    'total' => ['type' => 'integer'],
+                ],
+            ],
+        ],
+    ];
+
+    $output = (new LlmsTxtExporter)->export($document);
+
+    // A referenced parameter has its name and location on the target, so the
+    // row used to be skipped entirely and the section read "No parameters.";
+    // a referenced schema was printed as a `$ref` block with no shape in it.
+    expect($output)->toContain(
+        '| reportId | path | yes | string |',
+        '"total": {',
+        '"format": "uuid"',
+        '"since": {',
+    )->and($output)->not->toContain('$ref', 'No parameters.', 'No documented JSON request body.');
+});
+
+it('renders an unresolvable schema reference as an empty object', function (): void {
+    $output = (new LlmsTxtExporter)->export(llmsExporterDocument([
+        '/broken' => [
+            'get' => [
+                'responses' => [
+                    '200' => [
+                        'description' => 'OK',
+                        'content' => [
+                            'application/json' => [
+                                'schema' => [
+                                    'type' => 'object',
+                                    'properties' => ['item' => ['$ref' => '#/components/schemas/Absent']],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    ]));
+
+    // `{}` is "any value"; `[]` would read as an empty tuple.
+    expect($output)->toContain('"item": {}');
+});
+
 it('produces byte-identical output for the same document', function (): void {
     $document = llmsExporterDocument([
         '/stable' => [

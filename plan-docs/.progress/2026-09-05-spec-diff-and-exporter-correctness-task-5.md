@@ -1,0 +1,4 @@
+- [x] tests/Unit/SpecDifferTest.php: all cases written and cross-checked against SpecDiffer output via a standalone php probe script (not pest, to respect verify-budget) — exact type+severity strings confirmed for every new/fixed case
+- [x] tests/Feature/PackageSetupTest.php: gate matrix extended (off/deny/allow/no-ability x docs+try-it proxy)
+- [x] php -l clean on both files
+- [ ] BLOCKED: `vendor/bin/pest --filter="SpecDiffer|PackageSetup"` not run to completion — verify-budget guard fired (180s) before this task's own final run could complete. Command to run: vendor/bin/pest --filter="SpecDiffer|PackageSetup"

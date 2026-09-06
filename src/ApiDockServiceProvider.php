@@ -6,12 +6,15 @@ namespace LvntR\ApiDock;
 
 use Composer\InstalledVersions;
 use Dedoc\Scramble\Scramble;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Facades\Gate;
 use LvntR\ApiDock\Console\AgentGuideCommand;
 use LvntR\ApiDock\Console\DiffCommand;
 use LvntR\ApiDock\Console\ExportCommand;
 use LvntR\ApiDock\Console\SyncCommand;
 use LvntR\ApiDock\Extensions\AiMetadataOperationExtension;
 use LvntR\ApiDock\Extensions\FeatureOperationExtension;
+use LvntR\ApiDock\Http\Middleware\ApiDockAccess;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 
@@ -64,6 +67,8 @@ final class ApiDockServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
+        $this->registerDefaultAccessGate();
+
         // The compiled panel lives in `public/vendor/api-dock`, which Composer never touches:
         // without a republish an upgraded package keeps serving the previous bundle. Laravel's
         // own `post-autoload-dump` script republishes everything tagged `laravel-assets` with
@@ -125,6 +130,42 @@ final class ApiDockServiceProvider extends PackageServiceProvider
         $version = is_file($path) ? (string) filemtime($path) : self::VERSION;
 
         return asset('vendor/api-dock/'.$file).'?id='.$version;
+    }
+
+    /**
+     * Register the deny-all `viewApiDock` default, so the optional gate fails closed.
+     *
+     * Only when `gate.enabled` is on and the application has not defined the ability
+     * itself. Laravel already denies an ability nobody defined, so this does not create
+     * the refusal — it makes it a deliberate, inspectable one: `Gate::has('viewApiDock')`
+     * answers true, and an operator who turns the gate on and misspells the ability name
+     * finds a registered refusal rather than a silent fallthrough.
+     *
+     * The `has()` guard is load-bearing in BOTH boot orders. An auto-discovered package
+     * provider boots BEFORE the application's own providers, so `has()` is normally false
+     * here and the host's later `Gate::define()` overwrites this default — which is the
+     * intent. When this provider is instead listed after the host's provider in
+     * `bootstrap/providers.php`, `has()` is already true and we must NOT overwrite:
+     * clobbering it would revoke an ability the application deliberately granted and lock
+     * out the very admins it was defined for.
+     */
+    private function registerDefaultAccessGate(): void
+    {
+        if (! (bool) config('api-dock.gate.enabled', false)) {
+            return;
+        }
+
+        if (Gate::has(ApiDockAccess::ABILITY)) {
+            return;
+        }
+
+        // The parameter is nullable so the refusal also covers an unauthenticated
+        // request: given a callback whose first parameter does not admit null, Laravel
+        // skips it for a guest instead of running it.
+        Gate::define(
+            ApiDockAccess::ABILITY,
+            static fn (?Authenticatable $user): bool => false,
+        );
     }
 
     /**

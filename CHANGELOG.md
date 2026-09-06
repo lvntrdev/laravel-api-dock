@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+## Unreleased
+
+### Fixed
+
+- **`api-dock:diff` / `api-dock:sync --check` now detect change classes that were previously silent or misclassified.** A consuming CI that was green may fail on the next run — this is the gate catching a real change it used to miss, not a regression. Specifically:
+  - A response, request body, or parameter losing one side of a `content`/`headers`/media-type block is now reported (`schema_block_removed`/`schema_block_added`) instead of producing no change at all.
+  - Every component section (`parameters`, `requestBodies`, `responses`, `headers`, `securitySchemes`) is compared, not only `schemas`; a removed or changed shared component now reports `component_removed`/`component_added`/`auth_requirement_changed` instead of a blanket `cosmetic_change`.
+  - Removing a path parameter is now correctly `breaking` (`parameter_removed`) rather than `additive`.
+  - A `$ref` swapped to point at a different component is now `schema_reference_changed` and breaking, instead of `cosmetic`.
+  - The declared `servers` list is compared; dropping a server URL is now `server_changed` and breaking.
+  - `items`, `contains`, and `additionalProperties` present on only one side are now classified as `schema_constraint_narrowed`/`schema_constraint_widened` instead of being ignored.
+  - `type: 'string'` and `type: ['string']` are recognised as equivalent and no longer reported as a spurious `type_narrowed`.
+  - `example`/`examples` values are reported as `cosmetic_change` rather than walked as if they were schemas.
+- **`llms.txt` and MCP tool export share one `$ref` resolver.** `llms.txt` no longer prints a raw `{"$ref": "..."}` block or reports "No parameters." for a referenced parameter; a parameter typed by a component now shows the resolved type instead of the component name.
+- **MCP `inputSchema` spreads `allOf` request bodies.** A request body composed with `allOf` now has every branch's properties spread into the tool's top-level `properties` instead of collapsing into a single opaque `body` property.
+- **MCP tool names are sanitised and de-duplicated.** A name not matching `^[A-Za-z0-9_-]{1,64}$` (for example a raw `Controller@method` action id used as `operationId`) is rewritten instead of exported as-is; a name already taken by an earlier tool in the same export gets a deterministic `_2`, `_3`, … suffix.
+- **Try-it self-host port handling.** The application's own port (from `APP_URL` or a `try_it.self_hosts` entry) is accepted automatically for that host; `try_it.allowed_ports` continues to bound foreign hosts only.
+- **The panel states the credential lifetime it actually has.** With `try_it.profile_persistence.enabled` on, the settings panel no longer claims credentials are tied to the session — it says they outlive logout, names the window, and warns that other sessions of the same user can reach them. **If you publish the package views and use persistent profiles, republish `docs.blade.php`:** an older published copy omits the attribute carrying the mode, and the panel then shows the session wording, which is the wrong promise in that mode.
+
+### Added
+
+- **Optional `viewApiDock` access gate.** `gate.enabled` (config key, off by default) adds an authorization check on top of the `middleware` stack, evaluated against the `viewApiDock` Gate ability on every package route. Fails closed: enabling it without defining the ability denies everyone. See [Restricting who can open the panel](README.md#restricting-who-can-open-the-panel).

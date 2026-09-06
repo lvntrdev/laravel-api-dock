@@ -170,7 +170,13 @@ it('classifies breaking additive and cosmetic changes with stable public fields'
     }
 });
 
-it('treats scalar replacements and reduced unions as breaking but expanded unions as additive', function (): void {
+it('reads a response type change in the direction the consumer feels it', function (): void {
+    // `apiDockSchemaDocument` builds a RESPONSE schema, so severity follows the
+    // reader, not the sender: a widened response is the breaking one — the client
+    // now has to handle a type it never received before — while a narrowed one is
+    // additive, because every value it can still produce was already handled.
+    // Replacing a scalar outright breaks either way. The request side of the same
+    // rule is pinned in `tests/Unit/SpecDifferTest.php`.
     $differ = new SpecDiffer;
 
     $scalar = $differ->diff(
@@ -186,11 +192,15 @@ it('treats scalar replacements and reduced unions as breaking but expanded union
         apiDockSchemaDocument(['type' => ['string', 'null']]),
     );
 
-    expect($scalar->hasBreaking())->toBeTrue()
-        ->and(array_column($scalar->toArray()['changes'], 'type'))->toContain('type_narrowed')
-        ->and($reducedUnion->hasBreaking())->toBeTrue()
-        ->and($expandedUnion->hasBreaking())->toBeFalse()
-        ->and(array_column($expandedUnion->toArray()['changes'], 'type'))->toContain('type_widened');
+    // Split into independent expectations on purpose: a chained `->and()` after a
+    // failing assertion never runs, so the old chain hid whichever direction was
+    // wrong behind the first mismatch.
+    expect($scalar->hasBreaking())->toBeTrue();
+    expect(array_column($scalar->toArray()['changes'], 'type'))->toContain('type_narrowed');
+    expect($reducedUnion->hasBreaking())->toBeFalse();
+    expect(array_column($reducedUnion->toArray()['changes'], 'type'))->toContain('type_narrowed');
+    expect($expandedUnion->hasBreaking())->toBeTrue();
+    expect(array_column($expandedUnion->toArray()['changes'], 'type'))->toContain('type_widened');
 });
 
 it('returns one from sync check for breaking changes and never writes', function (): void {
