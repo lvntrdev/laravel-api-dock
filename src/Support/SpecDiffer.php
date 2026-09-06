@@ -1900,9 +1900,9 @@ final class SpecDiffer
 
     /**
      * @return array<string, list<string>> the expanded URLs per (server URL,
-     *                                      variable name) enum, keyed by
-     *                                      "url\0variable" so the same variable
-     *                                      can be compared across documents.
+     *                                     variable name) enum, keyed by
+     *                                     "url\0variable" so the same variable
+     *                                     can be compared across documents.
      */
     private function serverAllowedUrlsByVariable(mixed $value): array
     {
