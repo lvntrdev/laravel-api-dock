@@ -2,10 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Auth\GenericUser;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
@@ -30,6 +33,14 @@ const API_DOCK_STORE_HINT = '****1234';
  * storage assertion has to name it again here.
  */
 const API_DOCK_STORE_SESSION_KEY = 'api-dock.try-it.profiles';
+
+/**
+ * Mirrors the store's own private persistent-mode key prefix, for the same
+ * reason as the session key above. The authenticated user id is appended: the
+ * whole isolation guarantee of persistent mode is that this key differs per
+ * user, so the tests have to be able to name it.
+ */
+const API_DOCK_STORE_CACHE_PREFIX = 'api-dock.try-it.profiles.';
 
 /**
  * A session identity for HTTP-level tests only: the store itself no longer
@@ -74,6 +85,31 @@ function apiDockStoreResolvesTo(array $addresses): void
 function apiDockStoreRawEntry(): string
 {
     return var_export(session()->get(API_DOCK_STORE_SESSION_KEY), true);
+}
+
+/**
+ * Whatever persistent mode is holding for one user id, straight out of the
+ * cache — the persistent-mode counterpart of apiDockStoreRawEntry().
+ */
+function apiDockStorePersistentEntry(int|string $userId): mixed
+{
+    // The key is namespaced by the effective default guard, not just the id
+    // (AuthProfileStore::userCacheKey()) — mirrored here rather than imported,
+    // since the point is to read the cache the way an outside caller would.
+    $guard = config('auth.defaults.guard', 'web');
+    $guard = is_string($guard) && $guard !== '' ? $guard : 'web';
+
+    return cache()->get(API_DOCK_STORE_CACHE_PREFIX.$guard.':'.$userId);
+}
+
+/**
+ * Turn persistent mode on for one test, with an explicit ttl so nothing depends
+ * on the shipped 30-day default.
+ */
+function apiDockStorePersistenceOn(int $ttlMinutes = 60): void
+{
+    config()->set('api-dock.try_it.profile_persistence.enabled', true);
+    config()->set('api-dock.try_it.profile_persistence.ttl_minutes', $ttlMinutes);
 }
 
 /**
@@ -940,4 +976,281 @@ it('drops a server variable whose value is empty after trimming', function (): v
     // and falls back to the spec default, so storing it would point the outbound request
     // at a host the panel renders as empty.
     expect($profile['server_variables'])->toBe(['region' => 'eu-west']);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Persistent mode — opt-in, and only ever opt-in
+|--------------------------------------------------------------------------
+|
+| Every test above runs with the flag OFF, which is the shipped default, so
+| they are themselves the regression cover for "nothing changed for anyone who
+| did not opt in". The tests below are the boundary of the opt-in itself: what
+| the longer lifetime buys, and what it must still never do.
+*/
+
+it('ships with credential persistence off, so an authenticated reader still gets the session lifetime', function (): void {
+    // The shipped config, not a test override. A default flipped to true would
+    // silently extend every consumer's credential lifetime past logout.
+    expect(config('api-dock.try_it.profile_persistence.enabled'))->toBeFalse();
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    // Being logged in is not enough on its own: with the flag off the profile
+    // goes to the session and the cache is never touched.
+    expect(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeTrue()
+        ->and(apiDockStorePersistentEntry(7))->toBeNull();
+
+    $this->flushSession();
+
+    expect($store->find($profile['id']))->toBeNull()
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBeNull();
+});
+
+it('keeps a persisted profile across a logout, and stores only ciphertext for it', function (): void {
+    apiDockStorePersistenceOn();
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    $entry = apiDockStorePersistentEntry(7);
+
+    // The whole point of the mode: the record is in the cache under this user's
+    // own key, and NOT in the session that is about to be destroyed.
+    expect($entry)->toBeArray()
+        ->and(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse()
+        ->and(var_export($entry, true))->not->toContain(API_DOCK_STORE_CREDENTIAL)
+        ->and(var_export($entry, true))->toContain($profile['id']);
+
+    // A logout, as the framework performs it: the session payload is gone and
+    // the guard no longer holds a resolved user.
+    Session::flush();
+    Auth::forgetGuards();
+
+    expect(Auth::id())->toBeNull()
+        ->and(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse();
+
+    // The next login, on a fresh store instance — the store is resolved per
+    // request, so a new instance is what the next request would really get.
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $next = app(AuthProfileStore::class);
+
+    expect($next->find($profile['id']))->not->toBeNull()
+        ->and($next->all())->toHaveCount(1)
+        ->and($next->revealCredentialForOutboundRequest($profile['id']))
+        ->toBe(API_DOCK_STORE_CREDENTIAL);
+});
+
+it('drops a persisted profile once the configured ttl has passed', function (): void {
+    apiDockStorePersistenceOn(ttlMinutes: 10);
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    $this->travel(9)->minutes();
+
+    // Still inside the window, so the assertions below are expiry and not a
+    // store that never wrote anything.
+    expect($store->find($profile['id']))->not->toBeNull();
+
+    $this->travel(2)->minutes();
+
+    expect($store->find($profile['id']))->toBeNull()
+        ->and($store->all())->toBe([])
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBeNull()
+        ->and(apiDockStorePersistentEntry(7))->toBeNull();
+});
+
+it('falls back to the default ttl rather than storing nothing when the configured one is unusable', function (): void {
+    apiDockStorePersistenceOn();
+    // Zero or negative makes the cache repository drop the key on the spot. A
+    // misconfiguration must not turn every save into a silent no-op.
+    config()->set('api-dock.try_it.profile_persistence.ttl_minutes', 0);
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    expect($store->find($profile['id']))->not->toBeNull()
+        ->and(apiDockStorePersistentEntry(7))->toBeArray();
+});
+
+it('does not let one user read, use or delete another user persisted profile', function (): void {
+    apiDockStorePersistenceOn();
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $seven = app(AuthProfileStore::class);
+    $sevens = $seven->put(['label' => 'Owned by seven', 'credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    $this->actingAs(new GenericUser(['id' => 8]));
+
+    $eight = app(AuthProfileStore::class);
+
+    // Same shared cache store, same process — only the user id in the key
+    // stands between the two.
+    expect($eight->all())->toBe([])
+        ->and($eight->find($sevens['id']))->toBeNull()
+        ->and($eight->revealCredentialForOutboundRequest($sevens['id']))->toBeNull();
+
+    $eights = $eight->put(['label' => 'Owned by eight', 'credential' => API_DOCK_STORE_CREDENTIAL.'-8']);
+
+    // A delete against an id it does not own is a no-op, and must not empty the
+    // other user's bucket either.
+    $eight->forget($sevens['id']);
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $sevenAgain = app(AuthProfileStore::class);
+
+    expect($sevenAgain->all())->toHaveCount(1)
+        ->and($sevenAgain->all()[0]['id'])->toBe($sevens['id'])
+        ->and($sevenAgain->find($eights['id']))->toBeNull()
+        ->and($sevenAgain->revealCredentialForOutboundRequest($eights['id']))->toBeNull()
+        ->and(apiDockStorePersistentEntry(7))->toBeArray()
+        ->and(apiDockStorePersistentEntry(8))->toBeArray()
+        ->and(apiDockStorePersistentEntry(7))->not->toBe(apiDockStorePersistentEntry(8));
+});
+
+it('falls back to the session for a guest even with persistence on', function (): void {
+    apiDockStorePersistenceOn();
+
+    // A spy in place of the real repository: the claim is not merely that no
+    // key was found afterwards, but that the persistent store was never touched
+    // at all for a visitor with no stable identity to key it on.
+    $cache = Mockery::spy(CacheRepository::class);
+    app()->instance(CacheRepository::class, $cache);
+
+    $store = app(AuthProfileStore::class);
+
+    expect(Auth::id())->toBeNull();
+
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    expect(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeTrue()
+        ->and($store->find($profile['id']))->not->toBeNull()
+        ->and(apiDockStoreRawEntry())->not->toContain(API_DOCK_STORE_CREDENTIAL);
+
+    $cache->shouldNotHaveReceived('put');
+    $cache->shouldNotHaveReceived('get');
+    $cache->shouldNotHaveReceived('forget');
+
+    // And the narrower lifetime really is the one in force: the next visitor on
+    // a fresh session inherits nothing.
+    $this->flushSession();
+
+    expect($store->find($profile['id']))->toBeNull()
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBeNull();
+});
+
+it('removes a persisted profile with forget and clears both stores with flush', function (): void {
+    apiDockStorePersistenceOn();
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+
+    $first = $store->put(['label' => 'One', 'credential' => API_DOCK_STORE_CREDENTIAL]);
+    $second = $store->put(['label' => 'Two', 'credential' => API_DOCK_STORE_CREDENTIAL.'-2']);
+
+    $store->forget($first['id']);
+
+    expect($store->find($first['id']))->toBeNull()
+        ->and($store->revealCredentialForOutboundRequest($first['id']))->toBeNull()
+        ->and(var_export(apiDockStorePersistentEntry(7), true))->not->toContain($first['id'])
+        ->and($store->find($second['id']))->not->toBeNull();
+
+    // A leftover from before the flag was flipped on. An explicit "delete
+    // everything" that skipped it would leave behind a credential the user
+    // believes is gone.
+    apiDockStoreSeedLegacyProfile('legacyid');
+
+    $store->flush();
+
+    expect($store->all())->toBe([])
+        ->and($store->revealCredentialForOutboundRequest($second['id']))->toBeNull()
+        ->and(apiDockStorePersistentEntry(7))->toBeNull()
+        ->and(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse();
+});
+
+it('clears a persisted profile with flush even after persistence has since been turned off', function (): void {
+    apiDockStorePersistenceOn();
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+    $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    expect(apiDockStorePersistentEntry(7))->not->toBeNull();
+
+    // The operator disables the flag after the credential was persisted. A
+    // "delete everything" call must still reach it, or re-enabling the flag
+    // inside the ttl window would resurrect a credential the user was told
+    // was gone.
+    config()->set('api-dock.try_it.profile_persistence.enabled', false);
+
+    $store->flush();
+
+    expect(apiDockStorePersistentEntry(7))->toBeNull();
+});
+
+it('drops the cache entry entirely once forget removes the last persisted profile', function (): void {
+    apiDockStorePersistenceOn();
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    $store->forget($profile['id']);
+
+    // Not an empty array left under the key: that entry would keep renewing its
+    // own ttl on every write and outlive what it holds.
+    expect(apiDockStorePersistentEntry(7))->toBeNull();
+});
+
+it('does not let two tenants sharing one guard and one numeric id collide once key_namespace is set', function (): void {
+    apiDockStorePersistenceOn();
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', fn (): string => 'tenant-a');
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+    $store = app(AuthProfileStore::class);
+    $store->put(['label' => 'Tenant A', 'credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    $guard = config('auth.defaults.guard', 'web');
+    expect(cache()->get('api-dock.try-it.profiles.tenant-a:'.$guard.':7'))->not->toBeNull();
+
+    // Same guard, same numeric id, a DIFFERENT tenant: without the namespace
+    // this would resolve to the exact same cache key as tenant A above.
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', fn (): string => 'tenant-b');
+    $this->flushSession();
+    $this->actingAs(new GenericUser(['id' => 7]));
+    $store = app(AuthProfileStore::class);
+
+    expect($store->all())->toBe([]);
+});
+
+it('surfaces a failed persistent write instead of reporting the profile as saved', function (): void {
+    apiDockStorePersistenceOn();
+    $this->actingAs(new GenericUser(['id' => 7]));
+
+    $cache = Mockery::mock(CacheRepository::class);
+    $cache->shouldReceive('get')->andReturn(null);
+    $cache->shouldReceive('getStore')->andReturn(new stdClass);
+    $cache->shouldReceive('put')->andReturn(false);
+    app()->instance(CacheRepository::class, $cache);
+
+    $store = app(AuthProfileStore::class);
+
+    expect(fn () => $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]))
+        ->toThrow(RuntimeException::class);
 });

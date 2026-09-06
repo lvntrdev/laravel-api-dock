@@ -13,6 +13,7 @@ import {
   operationKeyFromHash,
 } from '@/lib/operations'
 import { theme, toggleTheme } from '@/lib/theme'
+import type { ProfileStorageMode } from '@/lib/tryItProfiles'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
 
 const props = defineProps<{
@@ -20,6 +21,10 @@ const props = defineProps<{
   baseUrl: string
   csrfToken: string
   version: string
+  // Passed straight through to the settings panel, which states the credential
+  // lifetime this installation actually keeps.
+  profileStorage: ProfileStorageMode
+  profileLifetimeMinutes: number
 }>()
 
 const document = ref<OpenApiDocument>()
@@ -184,6 +189,8 @@ function isOpenApiDocument(payload: unknown): payload is OpenApiDocument {
             :document="document"
             :base-url="baseUrl"
             :csrf-token="csrfToken"
+            :profile-storage="profileStorage"
+            :profile-lifetime-minutes="profileLifetimeMinutes"
           />
           <OperationDetail
             v-else

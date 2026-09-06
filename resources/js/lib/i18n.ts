@@ -171,6 +171,10 @@ export const en = {
   'settings.intro': 'Profiles, the request target and how to use the package live here.',
   'settings.profilesTitle': 'Profiles',
   'settings.profilesHint': 'The credential stays on the server, encrypted and tied to this session; the browser keeps only the selected profile’s id. A profile also carries the tenant (server variables) and the base URL, so every operation reuses them.',
+  // Shown instead of the line above when this installation stores profiles beyond the
+  // session. The difference is a security fact for the reader, not a detail: on a shared
+  // workstation logging out no longer takes the credential with it.
+  'settings.profilesHintPersistent': 'The credential stays on the server, encrypted, but it is not tied to this session: it survives logout, stays reachable from your account’s other sessions on any device, and is kept for {duration} after the last change unless you delete it here. The browser keeps only the selected profile’s id. A profile also carries the tenant (server variables) and the base URL, so every operation reuses them.',
   'settings.noProfiles': 'No profile has been created yet.',
   'settings.newProfile': 'New profile',
   'settings.profileActive': 'selected',
@@ -422,6 +426,7 @@ export const tr: Record<MessageKey, string> = {
   'settings.intro': 'Profiller, istek hedefi ve paketin nasıl kullanılacağı burada.',
   'settings.profilesTitle': 'Profiller',
   'settings.profilesHint': 'Kimlik bilgisi sunucuda, şifrelenmiş ve bu oturuma bağlı olarak kalır; tarayıcı yalnızca seçili profilin kimliğini tutar. Profil ayrıca kiracıyı (sunucu değişkenleri) ve temel URL’yi taşır, böylece her operasyon bunları yeniden kullanır.',
+  'settings.profilesHintPersistent': 'Kimlik bilgisi sunucuda şifrelenmiş olarak kalır, ancak bu oturuma bağlı değildir: oturumu kapatsanız da silinmez, hesabınızın başka cihazlardaki diğer oturumlarından da erişilebilir ve buradan silmediğiniz sürece son değişiklikten sonra {duration} boyunca saklanır. Tarayıcı yalnızca seçili profilin kimliğini tutar. Profil ayrıca kiracıyı (sunucu değişkenleri) ve temel URL’yi taşır, böylece her operasyon bunları yeniden kullanır.',
   'settings.noProfiles': 'Henüz profil oluşturulmadı.',
   'settings.newProfile': 'Yeni profil',
   'settings.profileActive': 'seçili',
@@ -576,4 +581,33 @@ export function t(
   return message.replace(/\{([^{}]+)\}/g, (placeholder, name: string) =>
     Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : placeholder,
   )
+}
+
+const MINUTES_PER_HOUR = 60
+const MINUTES_PER_DAY = 60 * 24
+
+/**
+ * A minute count as a locale-correct duration — “30 days”, “30 gün”. Formatted by
+ * `Intl` rather than a message key per unit, so the plural form is the platform's
+ * and not a hand-written guess per locale.
+ *
+ * The unit is the largest one the value fills, and a remainder rounds UP: the one
+ * caller states how long a stored credential stays reachable, and overstating that
+ * window is the safe direction for a warning.
+ */
+export function formatDuration(minutes: number, at: Locale = locale.value): string {
+  let unit: 'day' | 'hour' | 'minute' = 'minute'
+  let size = 1
+
+  if (minutes >= MINUTES_PER_DAY) {
+    unit = 'day'
+    size = MINUTES_PER_DAY
+  } else if (minutes >= MINUTES_PER_HOUR) {
+    unit = 'hour'
+    size = MINUTES_PER_HOUR
+  }
+
+  const value = Math.max(1, Math.ceil(minutes / size))
+
+  return new Intl.NumberFormat(at, { style: 'unit', unit, unitDisplay: 'long' }).format(value)
 }

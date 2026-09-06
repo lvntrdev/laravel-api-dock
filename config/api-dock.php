@@ -43,7 +43,40 @@ return [
         'max_response_bytes' => 262144, // 256 KB ceiling on the proxied body; anything beyond it is truncated and flagged rather than buffered.
         'throttle' => '30,1', // Rate limit (requests,minutes) on the proxy route, since every call is an outbound request from your server.
         'allowed_methods' => ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // Verbs the panel may request; narrow this to widen nothing.
-        // Credential profiles live in the session, so they last exactly as long as the reader's login: no expiry to configure, and logging out takes them with it.
+        // By default credential profiles live in the session, so they last exactly as long as the reader's login: no expiry to configure, and logging out takes them with it.
         'max_profiles' => 10, // Credential profiles kept per session; the oldest is dropped past this. Every request unserializes the whole session payload, so an uncapped list would tax every page load.
+        'profile_persistence' => [
+            // Off by default: preserves the existing session-scoped guarantee for every
+            // consumer of this package. A consuming app opts in explicitly.
+            //
+            // Turning this ON is a deliberate security trade-off. The profiles move to the
+            // cache, keyed by the authenticated user id, and logging out no longer deletes
+            // them: a stored credential then survives until it is deleted from the panel or
+            // its TTL expires. The credential itself is still encrypted with the app
+            // encrypter before it reaches the cache driver, so a cache dump yields
+            // ciphertext — but anyone who can log back in as that user gets the profile back.
+            // Leave this off unless a shared workstation is not part of your threat model.
+            //
+            // A request with no authenticated user (a guest whose only identity IS the
+            // session) always falls back to session storage even with this on: there is no
+            // stable identity to key persistent storage on, and keying it on anything weaker
+            // would hand one visitor's credential to the next.
+            'enabled' => false,
+            // Minutes. Default 30 days — long enough that a rarely-rotated API token is
+            // not re-entered every login, short enough that a stale credential does not
+            // live forever. Requires a cache store that is actually shared and persistent
+            // ('redis', 'memcached', 'database'); with 'array' the profiles die with the
+            // process and with a per-node 'file' store they follow whichever node served
+            // the write.
+            'ttl_minutes' => 60 * 24 * 30,
+            // The key is namespaced by the default auth guard, so two guards (or two
+            // providers) never collide on a shared numeric id. That is NOT enough for a
+            // tenant-per-database app whose per-tenant `users` table restarts ids at 1
+            // while every tenant shares one cache store — set a closure here that
+            // returns the current tenant's id (e.g. `fn () => tenant('id')`) to also
+            // namespace by tenant. Leave null for a single-tenant app; the guard+id key
+            // is already unique there.
+            'key_namespace' => null,
+        ],
     ],
 ];

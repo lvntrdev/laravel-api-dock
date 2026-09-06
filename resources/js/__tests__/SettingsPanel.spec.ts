@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import TryItPanel from '@/components/TryItPanel.vue'
+import { setLocale } from '@/lib/i18n'
 import { loadProfiles, profiles, resetProfiles } from '@/lib/tryItProfiles'
 import { resetTryItSession, selectedProfileId } from '@/lib/tryItSession'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
@@ -209,14 +210,51 @@ describe('SettingsPanel', () => {
       .toBe(profile.base_url)
     wrapper.unmount()
   })
+
+  // The credential hint is a security promise, and the two storage modes make opposite
+  // ones: the session copy must never be shown where a credential outlives the login.
+  it('promises the session lifetime when profiles are session-scoped', async () => {
+    setLocale('en')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const wrapper = mountSettings(apiDocument, { profileStorage: 'session' })
+    await flushPromises()
+
+    const hint = wrapper.get('[data-testid="profiles-hint"]').text()
+
+    expect(hint).toContain('encrypted and tied to this session')
+    expect(hint).not.toContain('survives logout')
+    wrapper.unmount()
+  })
+
+  it('warns that a persistent profile outlives logout, and for how long', async () => {
+    setLocale('en')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const wrapper = mountSettings(apiDocument, {
+      profileStorage: 'persistent',
+      profileLifetimeMinutes: 60 * 24 * 30,
+    })
+    await flushPromises()
+
+    const hint = wrapper.get('[data-testid="profiles-hint"]').text()
+
+    expect(hint).toContain('survives logout')
+    expect(hint).toContain('other sessions')
+    expect(hint).toContain('30 days')
+    expect(hint).not.toContain('encrypted and tied to this session')
+    wrapper.unmount()
+  })
 })
 
-function mountSettings(panelDocument: OpenApiDocument = apiDocument) {
+function mountSettings(
+  panelDocument: OpenApiDocument = apiDocument,
+  props: Record<string, unknown> = {},
+) {
   return mount(SettingsPanel, {
     props: {
       document: panelDocument,
       baseUrl: '/api-dock',
       csrfToken: 'csrf-token',
+      ...props,
     },
   })
 }

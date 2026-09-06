@@ -8,6 +8,21 @@ export interface StoredTryItProfile extends TryItProfile {
   server_variables?: Record<string, string>
 }
 
+/**
+ * Where this installation keeps profiles, mirroring `AuthProfileStore::MODE_*`. The
+ * panel never chooses it — the server states it on the mount element — and it changes
+ * nothing but what the panel PROMISES the reader about a credential's lifetime.
+ */
+export type ProfileStorageMode = 'session' | 'persistent'
+
+/**
+ * Used when the mount element names the persistent mode without a lifetime, which an
+ * older published `docs.blade.php` would. It matches the shipped config default
+ * (`try_it.profile_persistence.ttl_minutes`), so the sentence keeps a plausible number
+ * rather than a hole; the warning itself does not depend on it.
+ */
+export const DEFAULT_PROFILE_LIFETIME_MINUTES = 60 * 24 * 30
+
 export interface ProfileCredentialInput {
   label: string
   baseUrl: string

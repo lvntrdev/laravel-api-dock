@@ -128,7 +128,18 @@ final class AuthProfileController
             return self::error('A session is required to use try-it profiles.', Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        $this->profiles->forget($profile);
+        try {
+            $this->profiles->forget($profile);
+        } catch (Throwable $exception) {
+            // No credential in scope here, unlike store() — the profile id alone
+            // reaches the log.
+            Log::error('API Dock could not delete a try-it profile.', [
+                'exception' => $exception::class,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return self::error('The try-it profile could not be deleted.', Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
 
         return new JsonResponse(null, Response::HTTP_NO_CONTENT);
     }

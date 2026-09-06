@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive } from 'vue'
 
-import { t } from '@/lib/i18n'
+import { formatDuration, locale, t } from '@/lib/i18n'
 import { collectOperations } from '@/lib/operations'
 import { narrowServerVariables, resolveServerPreview, withCurrentOrigin } from '@/lib/tryIt'
 import type { TryItProfile } from '@/lib/tryIt'
 import {
   createProfile as createStoredProfile,
+  DEFAULT_PROFILE_LIFETIME_MINUTES,
   deleteProfile as deleteStoredProfile,
   loadProfiles,
   loadingProfiles,
@@ -14,6 +15,7 @@ import {
   profileError,
   profiles,
 } from '@/lib/tryItProfiles'
+import type { ProfileStorageMode } from '@/lib/tryItProfiles'
 import {
   ensureServerVariables,
   plainBaseUrl as storedPlainBaseUrl,
@@ -31,6 +33,10 @@ const props = defineProps<{
   document: OpenApiDocument
   baseUrl: string
   csrfToken: string
+  // The server states which store it puts profiles in; the panel only reports it.
+  // Session-scoped unless told otherwise, matching the package default.
+  profileStorage?: ProfileStorageMode
+  profileLifetimeMinutes?: number
 }>()
 
 const ARTISAN_COMMANDS = [
@@ -91,6 +97,20 @@ const resolvedTarget = computed(() => {
     narrowServerVariables(documentServer.value, serverVariables.value),
   )
 })
+
+// The credential lifetime is a security statement, so the copy follows the store the
+// server actually writes to: session-scoped profiles die with the login, persistent
+// ones outlive it and must say so — with the window they live for.
+const profilesHint = computed(() =>
+  props.profileStorage === 'persistent'
+    ? t('settings.profilesHintPersistent', {
+      duration: formatDuration(
+        props.profileLifetimeMinutes ?? DEFAULT_PROFILE_LIFETIME_MINUTES,
+        locale.value,
+      ),
+    })
+    : t('settings.profilesHint'),
+)
 
 const profileForm = reactive({
   label: '',
@@ -195,7 +215,7 @@ function selectProfile(id: string): void {
 
     <section class="settings-section">
       <h2>{{ t('settings.profilesTitle') }}</h2>
-      <p class="settings-section__hint">{{ t('settings.profilesHint') }}</p>
+      <p class="settings-section__hint" data-testid="profiles-hint">{{ profilesHint }}</p>
 
       <p v-if="profileDenied" class="panel-disabled" role="status" data-testid="settings-disabled">{{ profileDenied }}</p>
 
