@@ -29,7 +29,10 @@ const ALLOWED_TAGS = [
   'strong', 'summary', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
 ]
 
-const ALLOWED_ATTR = ['align', 'alt', 'class', 'href', 'src', 'style', 'title']
+// No `style`: an inline style is enough to cover the panel with a description's
+// own markup (`position: fixed; inset: 0`), so a spec author would be able to
+// place an overlay over whatever the reader is about to click.
+const ALLOWED_ATTR = ['align', 'alt', 'class', 'href', 'src', 'title']
 
 export function renderMarkdown(source: string): string {
   const trimmed = source.trim()
