@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { openSettings, settingsOpen } from '@/lib/appView'
+import { changelogOpen, openChangelog, openSettings, settingsOpen } from '@/lib/appView'
+import { collectChangelog, countChangelogEntries } from '@/lib/changelog'
 import { t } from '@/lib/i18n'
 import { groupOperations, groupOperationsByCategory } from '@/lib/operations'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
@@ -20,6 +21,9 @@ const searchInput = ref<HTMLInputElement>()
 // Groups start closed. A spec with a dozen tags otherwise opens as a wall of
 // endpoints the reader has to scroll past to reach the tag they came for.
 const expandedTags = ref(new Set<string>())
+// The changelog page is only offered when the spec actually carries history: an
+// empty page is a dead link, not a feature.
+const changelogCount = computed(() => countChangelogEntries(collectChangelog(props.document)))
 const categories = computed(() => groupOperationsByCategory(props.document, query.value))
 const hasMatches = computed(() => categories.value.some((category) => category.groups.length > 0))
 
@@ -110,6 +114,20 @@ function categoryLabel(name: string): string {
       >
         <i class="pi pi-cog" aria-hidden="true" />
         <span>{{ t('settings.title') }}</span>
+      </button>
+
+      <button
+        v-if="changelogCount > 0"
+        type="button"
+        class="sidebar-pinned"
+        data-testid="open-changelog"
+        :class="{ 'sidebar-pinned--active': changelogOpen }"
+        :aria-current="changelogOpen ? 'page' : undefined"
+        @click="openChangelog"
+      >
+        <i class="pi pi-history" aria-hidden="true" />
+        <span>{{ t('changelog.title') }}</span>
+        <small>{{ changelogCount }}</small>
       </button>
 
       <label class="search-field">

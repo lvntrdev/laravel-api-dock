@@ -203,3 +203,24 @@ it('renders the installed package version on the docs page', function (): void {
         ->assertOk()
         ->assertSee('data-version="'.e($version).'"', false);
 });
+
+it('stamps the docs mount with a per-account identity that is not the user id', function (): void {
+    // The browser stores try-it state per account, so it needs to tell one account
+    // from another — and nothing more. A raw id would be a gratuitous disclosure,
+    // and a shared stamp would let the next account read the previous one's history.
+    $identityOf = function (?int $userId): string {
+        $request = $userId === null
+            ? $this->get('/api-dock')
+            : $this->actingAs(new GenericUser(['id' => $userId]))->get('/api-dock');
+
+        $matched = preg_match('/data-identity="([^"]*)"/', $request->assertOk()->getContent() ?: '', $matches);
+
+        expect($matched)->toBe(1);
+
+        return $matches[1];
+    };
+
+    expect($identityOf(null))->toBe('');
+    expect($identityOf(1))->toMatch('/^[0-9a-f]{16}$/')
+        ->not->toBe($identityOf(2));
+});

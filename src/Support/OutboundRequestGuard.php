@@ -280,7 +280,7 @@ final class OutboundRequestGuard
         // endpoints was ceremony that protected nobody, so this is implicit and
         // not configurable away.
         $self = self::matchSelfHost($host);
-        $isSelf = $self['matched'];
+        $isSelf = $self['kind'] !== null;
 
         if (! $isSelf) {
             self::assertHostIsNotInternal($host);
@@ -299,10 +299,10 @@ final class OutboundRequestGuard
         // allowed name into a port scanner (`https://api.example.com:6379/`).
         $allowedPorts = self::allowedPorts();
 
-        // On a self host the port check is the ONLY boundary still standing —
-        // the allowlist and the address-class gate are bypassed there already —
-        // so it is narrowed to the port this application was configured to
-        // answer on, never dropped. Without it a stack served from
+        // On a self host the port check is the last boundary standing — the
+        // allowlist is bypassed there already, and so is the address-class gate
+        // for an exact match — so it is narrowed to the port this application
+        // was configured to answer on, never dropped. Without it a stack from
         // `http://localhost:8000` could not reach its own documented API unless
         // the operator put 8000 in `allowed_ports`, which would have opened that
         // port on every allowlisted FOREIGN host as well. The port comes from
@@ -334,13 +334,29 @@ final class OutboundRequestGuard
             self::deny(sprintf('The host [%s] could not be resolved.', $host));
         }
 
+        // A self host skips the address-class gate on purpose. A local or
+        // intranet deployment answers on 127.0.0.1 or a private range, and
+        // refusing to reach the very server that served this page would make
+        // try-it useless exactly where it is used most.
+        //
+        // A NAMED self host (`app.url`, a `self_hosts` entry) is that server, so
+        // it keeps the unconditional skip. A subdomain of one only inherits the
+        // exemption where it inherits the addresses: `tenant.example.com` on the
+        // app's own address is the app under another label, while the same name
+        // pointed at 10.0.0.5 is an internal service that borrowed a suffix, and
+        // an operator naming one apex would otherwise have exempted every
+        // private address anyone can publish a subdomain record for. The
+        // allowlist and internal-host skips are unchanged for both kinds; only
+        // this gate distinguishes them, and the extra resolution happens once,
+        // for a descendant only.
+        $exemptFromAddressGate = $self['kind'] === 'exact'
+            || ($self['kind'] === 'descendant' && $this->addressesBelongToSelfEntry($self['entries'], $addresses));
+
         foreach ($addresses as $address) {
-            // A self host skips the address-class gate on purpose. A local or
-            // intranet deployment answers on 127.0.0.1 or a private range, and
-            // refusing to reach the very server that served this page would make
-            // try-it useless exactly where it is used most. The reach is still
-            // that one host — nothing else private becomes addressable.
-            if (! $isSelf && self::isDeniedAddress($address)) {
+            if (! $exemptFromAddressGate && self::isDeniedAddress($address)) {
+                // Names the host only: the resolved address is what the caller
+                // was probing for, and a denial that quotes it back answers the
+                // question the boundary just refused to answer.
                 self::deny(sprintf('The host [%s] resolves to an address that may not be reached from this server.', $host));
             }
         }
@@ -396,24 +412,30 @@ final class OutboundRequestGuard
         // silently, so it was never the guarantee it looked like. The scheme is
         // constrained in `inspect()` and redirects are off, so nothing can hand the
         // handler a second scheme to follow.
+        $proxy = self::proxyOption();
+
         $options = [
             'http_errors' => false,
+            // An EMPTY string is a final "no proxy" to Guzzle: it neither consults
+            // HTTP(S)_PROXY nor lets libcurl read them (Guzzle sets CURLOPT_PROXY
+            // itself, to exactly this value). Omitting the option would leave the pin
+            // below negotiable. CURLOPT_PROXY is NOT passed in the `curl` array as
+            // well — Guzzle 8 refuses it there as a conflict with its own handling.
+            'proxy' => $proxy,
         ];
 
         if (! $target['is_ip_literal']) {
             // Pin the exact addresses that were validated. The Host header (and with
             // it SNI/certificate verification) still carries the original hostname.
-            $options['curl'] = [
-                CURLOPT_RESOLVE => [sprintf(
-                    '%s:%d:%s',
-                    $target['host'],
-                    $target['port'],
-                    implode(',', array_map(
-                        static fn (string $address): string => str_contains($address, ':') ? '['.$address.']' : $address,
-                        $target['addresses'],
-                    )),
-                )],
-            ];
+            $options['curl'][CURLOPT_RESOLVE] = [sprintf(
+                '%s:%d:%s',
+                $target['host'],
+                $target['port'],
+                implode(',', array_map(
+                    static fn (string $address): string => str_contains($address, ':') ? '['.$address.']' : $address,
+                    $target['addresses'],
+                )),
+            )];
         }
 
         $written = 0;
@@ -604,26 +626,70 @@ final class OutboundRequestGuard
      * returned only for a host that entry matched, so one self host never lends
      * its port to another.
      *
-     * @return array{matched: bool, ports: list<int>}
+     * The KIND of match is what {@see inspect()} weighs at the address gate: an
+     * `exact` match IS this application, while a `descendant` only carries its
+     * name. `entries` therefore names the parents a descendant hung off, so the
+     * exemption can be measured against their addresses instead of granted on
+     * the strength of the suffix alone. An exact match anywhere in the list wins
+     * over a descendant one; the ports of every matching entry still merge.
+     *
+     * @return array{kind: 'exact'|'descendant'|null, entries: list<string>, ports: list<int>}
      */
     private static function matchSelfHost(string $host): array
     {
-        $matched = false;
+        $kind = null;
+        $entries = [];
         $ports = [];
 
         foreach (self::selfHosts() as $self) {
-            if ($host !== $self['host'] && ! str_ends_with($host, '.'.$self['host'])) {
+            if ($host === $self['host']) {
+                $kind = 'exact';
+            } elseif (str_ends_with($host, '.'.$self['host'])) {
+                $kind ??= 'descendant';
+                $entries[] = $self['host'];
+            } else {
                 continue;
             }
-
-            $matched = true;
 
             if ($self['port'] !== null) {
                 $ports[] = $self['port'];
             }
         }
 
-        return ['matched' => $matched, 'ports' => array_values(array_unique($ports))];
+        return [
+            'kind' => $kind,
+            'entries' => array_values(array_unique($entries)),
+            'ports' => array_values(array_unique($ports)),
+        ];
+    }
+
+    /**
+     * True when every address the target resolved to also belongs to one of the
+     * self entries it hangs off.
+     *
+     * This is what keeps the private-address exemption attached to THIS
+     * application rather than to a name pattern. `tenant.example.com` is only
+     * the app answering under another label while it answers at the app's own
+     * addresses; pointed at 10.0.0.5 it is a foreign host that happens to be
+     * spelled like a subdomain, and the address gate must still see it.
+     *
+     * An entry that resolves to nothing grants nothing: an unresolvable parent
+     * would otherwise make every descendant of it exempt by vacuous truth.
+     *
+     * @param  list<string>  $entries
+     * @param  list<string>  $addresses
+     */
+    private function addressesBelongToSelfEntry(array $entries, array $addresses): bool
+    {
+        foreach ($entries as $entry) {
+            $entryAddresses = $this->resolveHost($entry);
+
+            if ($entryAddresses !== [] && array_diff($addresses, $entryAddresses) === []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1028,6 +1094,41 @@ final class OutboundRequestGuard
         $value = is_numeric($value) ? (int) $value : $fallback;
 
         return $value > 0 ? $value : $fallback;
+    }
+
+    /**
+     * The proxy this boundary uses: none, unless the operator names one.
+     *
+     * An ambient proxy is never inherited. The address the target resolves to is
+     * pinned in {@see send()}, and a proxy would connect on this server's behalf
+     * to whatever the name means to *it* — so a remotely resolving scheme
+     * ('socks5h', 'socks4a', where the proxy performs the lookup) is refused
+     * outright rather than allowed to reopen the window the pin closes.
+     */
+    private static function proxyOption(): string
+    {
+        /** @var mixed $configured */
+        $configured = config('api-dock.try_it.proxy');
+
+        if (! is_string($configured) || trim($configured) === '') {
+            return '';
+        }
+
+        $configured = trim($configured);
+
+        // Only a SOCKS proxy that resolves locally keeps the pin: cURL hands it the
+        // address it resolved itself (the one CURLOPT_RESOLVE fixed), whereas an
+        // HTTP proxy is given the hostname — in the request line or in a CONNECT —
+        // and resolves it again on its own, exactly the lookup the pin exists to
+        // prevent. 'socks5h'/'socks4a' delegate resolution the same way and are
+        // refused with it. Scheme is mandatory: a bare 'host:port' is read by cURL
+        // as http. Control characters and whitespace are refused too, since the
+        // value is handed to cURL verbatim.
+        if (preg_match('#^(?:socks5|socks4)://[^\s\x00-\x1f\x7f]+$#i', $configured) !== 1) {
+            self::deny('The configured try-it proxy must be a socks5 or socks4 URL; an HTTP or remotely resolving proxy would undo the pinned address.');
+        }
+
+        return $configured;
     }
 
     private static function deny(string $message): never

@@ -150,6 +150,7 @@ These are all keys shipped by `config/api-dock.php`.
 | `try_it.enabled` | `true` | Enables outbound try-it requests and credential-profile endpoints. On by default, and bounded by `try_it.allowed_hosts`, which ships empty: only this application's own host is reachable until you widen it. |
 | `try_it.allowed_hosts` | `[]` | Host allowlist. Empty denies all hosts. A bare entry is exact; a leading-dot entry matches subdomains. |
 | `try_it.self_hosts` | `[]` | Additional domains served by this application. Each entry and its subdomains bypass the foreign-host safety gates; the host from `APP_URL` is already included. |
+| `try_it.proxy` | `null` | Egress proxy for the outbound try-it request. Null uses none — including one inherited from `HTTP_PROXY`/`HTTPS_PROXY`. Only `socks5://` and `socks4://` are accepted; an HTTP proxy resolves the hostname itself and is refused. |
 | `try_it.timeout` | `10` | Maximum outbound request duration in seconds. Non-positive or non-numeric values fall back to 10. |
 | `try_it.connect_timeout` | `5` | Maximum connection-establishment duration in seconds. Non-positive or non-numeric values fall back to 5. |
 | `try_it.max_response_bytes` | `262144` | Maximum proxied response body, 256 KiB by default. Excess content is truncated and reported with `truncated: true`. |
@@ -162,6 +163,8 @@ These are all keys shipped by `config/api-dock.php`.
 | `include_generation_timestamp` | `false` | Stamp the generation time into the document. Off by default: it turns every regeneration into a diff. |
 
 For `allowed_hosts`, a bare entry is an exact host name, and a leading dot covers the site and its subdomains: `.example.com` matches both `example.com` and `api.example.com`. A near miss never matches either form — `evil-example.com` and `example.com.attacker.test` are both denied.
+
+Two rules keep the reached address the same as the checked one. A subdomain of a `self_hosts` entry is treated as this application only while it resolves to the **same addresses** as that entry: `tenant.example.com` answering on the app's own address is the app under another label, while a subdomain that answers anywhere else is checked like a foreign host and reaches no private address. And `try_it.proxy` is `null` by default, which disables every proxy for the outbound request — including one this server inherits from `HTTP_PROXY`/`HTTPS_PROXY` — because the guard pins the address it checked and a proxy would resolve the name a second time on its own. Set it only where outbound traffic must leave through an egress proxy; until you do, try-it reaches no external host in such a setup (this application's own host usually needs no proxy). Only `socks5://` and `socks4://` are accepted: cURL hands a SOCKS proxy the address it resolved itself, so the pinned address survives. An HTTP proxy (`http://`, `https://`) is refused because cURL gives it the hostname and the proxy resolves it again on its own; `socks5h://` and `socks4a://` delegate resolution the same way, and a value with no scheme is refused as well.
 
 ## Authoring AI metadata as one operation contract
 

@@ -1555,7 +1555,7 @@ kbd {
   padding: 0 12px 12px;
 }
 
-.ai-examples details span {
+.ai-examples details .panel-label {
   color: var(--surface-400);
   font: 8px/1 var(--font-mono);
   text-transform: uppercase;
@@ -2193,6 +2193,47 @@ kbd {
   font-size: 11px;
 }
 
+/* The base style above belongs to the dark curl block. These three places put the same
+   button on a light surface, where a near-black border and a dark hover read as a
+   disabled control rather than an action. */
+.proxy-response__summary .code-copy-button,
+.proxy-response__result-header .code-copy-button,
+.body-modal__header .code-copy-button {
+  color: var(--text-muted);
+  border-color: var(--border-color);
+}
+
+.proxy-response__summary .code-copy-button:hover,
+.proxy-response__result-header .code-copy-button:hover,
+.body-modal__header .code-copy-button:hover {
+  color: var(--primary-color);
+  background: var(--inset-bg);
+  border-color: var(--primary-color);
+}
+
+/* Hover / keyboard-focus label for the icon-only buttons. Placed on the document body by
+   `v-tooltip` (resources/js/lib/tooltip.ts) with viewport coordinates, so no card's
+   `overflow: hidden` can clip it. */
+.app-tooltip {
+  position: fixed;
+  z-index: 2000;
+  top: 0;
+  left: 0;
+  max-width: 260px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  color: var(--surface-0);
+  background: var(--surface-900);
+  font: 10px/1.4 var(--font-sans);
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+}
+
+.app-tooltip--visible {
+  opacity: 1;
+}
+
 .code-sample .credential-note {
   grid-column: 1 / -1;
   margin: 0;
@@ -2233,36 +2274,14 @@ kbd {
 
 .proxy-response__columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.proxy-response__request,
 .proxy-response__result {
   min-width: 0;
   padding: 18px 20px;
 }
 
-.proxy-response__request {
-  border-right: 1px solid var(--border-color);
-}
-
-.proxy-response__request pre,
-.ai-example__request pre {
-  margin: 8px 0 0;
-  padding: 14px;
-  overflow-x: auto;
-  color: var(--text-color);
-  background: var(--inset-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  font: 12px/1.7 var(--font-mono);
-  white-space: pre;
-}
-
-.proxy-response__request-label {
-  display: block;
-  margin-top: 16px;
-}
 
 .proxy-response__result-header {
   display: flex;
@@ -2436,29 +2455,23 @@ kbd {
   transform: rotate(90deg);
 }
 
-.ai-examples summary span {
-  color: inherit;
-  font: inherit;
-  letter-spacing: 0;
-  text-transform: none;
+.ai-example__actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .ai-examples details > .ai-example__columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
   padding: 0;
   border-top: 1px solid var(--border-color);
 }
 
-.ai-example__request,
 .ai-example__response {
   min-width: 0;
   padding: 16px 18px;
-}
-
-.ai-example__request {
-  border-right: 1px solid var(--border-color);
 }
 
 .ai-example__response > .json-tree {
@@ -2684,6 +2697,105 @@ kbd {
 
 .sidebar-pinned--active .pi {
   color: var(--primary-500);
+}
+
+.sidebar-pinned small {
+  margin-left: auto;
+  color: var(--sidebar-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.api-changelog {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.api-changelog__header h1 {
+  margin: 6px 0 8px;
+}
+
+.api-changelog__counts {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.api-changelog__releases,
+.api-changelog__release ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.api-changelog__releases {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.api-changelog__release h2 {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.api-changelog__release ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.api-changelog__entry {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-100);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.api-changelog__entry:hover {
+  border-color: var(--primary-500);
+}
+
+.api-changelog__entry-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.api-changelog__entry-body small {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.api-changelog__breaking {
+  margin-left: auto;
+  padding: 2px 7px;
+  color: var(--red-700);
+  background: var(--red-100);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.api-changelog__empty {
+  color: var(--text-muted);
 }
 
 .settings-panel {
@@ -2957,15 +3069,8 @@ kbd {
     padding: 22px 16px;
   }
 
-  .ai-examples details > .ai-example__columns,
-  .proxy-response__columns {
+  .ai-examples details > .ai-example__columns {
     grid-template-columns: 1fr;
-  }
-
-  .ai-example__request,
-  .proxy-response__request {
-    border-right: 0;
-    border-bottom: 1px solid var(--border-color);
   }
 
   .try-it-control--method,

@@ -1,5 +1,8 @@
 import { ref } from 'vue'
 
+import { hasSecretKey, isSecretKey } from '@/lib/tryItToken'
+import type { ParameterObject, SchemaObject } from '@/types/openapi'
+
 const STORAGE_KEY = 'api-dock:try-it'
 
 /** What the reader typed into one operation's try-it form, keyed `<in>:<name>`. */
@@ -9,6 +12,7 @@ export interface TryItOperationInputs {
 }
 
 interface TryItSessionState {
+  identity: string
   selectedProfileId: string
   selectedServer: string
   serverVariables: Record<string, string>
@@ -17,6 +21,7 @@ interface TryItSessionState {
 }
 
 const DEFAULT_STATE: TryItSessionState = {
+  identity: '',
   selectedProfileId: '',
   selectedServer: '',
   serverVariables: {},
@@ -52,6 +57,28 @@ export const plainBaseUrl = ref(initialState.plainBaseUrl)
 // the request the reader composed, never a credential — the credential lives in the
 // server-side profile and only its masked hint is ever visible to this module.
 export const operationInputs = ref<Record<string, TryItOperationInputs>>(initialState.operations)
+
+/**
+ * Which account this browser's stored state belongs to. An opaque stamp the server
+ * derives per request — never the user id itself — so two accounts sharing a browser
+ * cannot read each other's remembered requests. The guest stamp is `''`, and it
+ * matches only another guest.
+ */
+let boundIdentity = ''
+
+/**
+ * Binds the store to the account the current request authenticated as, purging the
+ * stored state when it belonged to anyone else. An envelope with NO identity is
+ * purged too: it predates this check, so there is nothing to prove it was written
+ * by whoever is reading now.
+ */
+export function bindIdentity(identity: string): void {
+  boundIdentity = identity
+
+  if (storedIdentity() !== identity) {
+    resetTryItSession()
+  }
+}
 
 export function setSelectedProfileId(profileId: string): void {
   selectedProfileId.value = profileId
@@ -97,6 +124,75 @@ export function storedOperationInputs(operationKey: string): TryItOperationInput
     parameters: { ...(stored?.parameters ?? {}) },
     body: stored?.body ?? '',
   }
+}
+
+/**
+ * Narrows a form snapshot to the inputs that may outlive the tab. Pure, and applied by
+ * the caller BEFORE `setOperationInputs`: the panel keeps showing everything the reader
+ * typed, only the copy that survives a reload is cut down.
+ *
+ * Header parameters go as a class — an api key, a bearer value and a signed hash all
+ * arrive that way, and none of them belongs in `localStorage`. The body goes WHOLE
+ * rather than field by field: a body with one field masked restores as a request that
+ * cannot be sent, which is worse than an empty one the reader retypes.
+ */
+export function classifyInputs(
+  inputs: TryItOperationInputs,
+  parameters: readonly ParameterObject[],
+  securitySchemes: unknown,
+): TryItOperationInputs {
+  const apiKeys = apiKeyNames(securitySchemes)
+  const secretKeys = new Set(
+    parameters
+      .filter((parameter) => isSecretParameter(parameter, apiKeys))
+      .map((parameter) => `${parameter.in}:${parameter.name}`),
+  )
+
+  return {
+    // The `header:` prefix is checked on the key itself, not only through the list
+    // above: a key whose parameter the current document no longer declares still
+    // names its location, and it must not slip through on that gap.
+    parameters: Object.fromEntries(
+      Object.entries(inputs.parameters)
+        .filter(([key]) => !key.startsWith('header:') && !secretKeys.has(key)),
+    ),
+    body: hasSecretKey(inputs.body) ? '' : inputs.body,
+  }
+}
+
+function isSecretParameter(parameter: ParameterObject, apiKeys: ReadonlySet<string>): boolean {
+  const schema = parameterSchema(parameter)
+
+  return parameter.in === 'header'
+    || schema?.format === 'password'
+    || schema?.writeOnly === true
+    // A declared api key travels as a plain parameter; the scheme is what names it.
+    || apiKeys.has(parameter.name)
+    || isSecretKey(parameter.name)
+}
+
+/** A `$ref` schema is left unresolved on purpose: nothing here needs to follow it, and
+ * an unreadable schema only means the name check below decides alone. */
+function parameterSchema(parameter: ParameterObject): SchemaObject | undefined {
+  return parameter.schema !== undefined && !('$ref' in parameter.schema)
+    ? parameter.schema
+    : undefined
+}
+
+function apiKeyNames(securitySchemes: unknown): ReadonlySet<string> {
+  const names = new Set<string>()
+
+  if (!isRecord(securitySchemes)) {
+    return names
+  }
+
+  for (const scheme of Object.values(securitySchemes)) {
+    if (isRecord(scheme) && scheme.type === 'apiKey' && typeof scheme.name === 'string') {
+      names.add(scheme.name)
+    }
+  }
+
+  return names
 }
 
 /**
@@ -159,6 +255,33 @@ export function resetTryItSession(): void {
   }
 }
 
+/**
+ * The identity on the stored envelope, or `null` when there is no envelope or it
+ * carries none. `null` is deliberately distinct from `''`: a guest must not inherit
+ * an unstamped envelope a logged-in reader may have left behind.
+ */
+function storedIdentity(): string | null {
+  try {
+    if (typeof localStorage === 'undefined') {
+      return null
+    }
+
+    const serialized = localStorage.getItem(STORAGE_KEY)
+
+    if (serialized === null) {
+      return null
+    }
+
+    const candidate: unknown = JSON.parse(serialized)
+
+    return isRecord(candidate) && typeof candidate.identity === 'string'
+      ? candidate.identity
+      : null
+  } catch {
+    return null
+  }
+}
+
 function storedState(): TryItSessionState {
   try {
     if (typeof localStorage === 'undefined') {
@@ -178,6 +301,7 @@ function storedState(): TryItSessionState {
     }
 
     return {
+      identity: typeof candidate.identity === 'string' ? candidate.identity : '',
       selectedProfileId: typeof candidate.selectedProfileId === 'string'
         ? candidate.selectedProfileId
         : '',
@@ -195,6 +319,7 @@ function persistState(): void {
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        identity: boundIdentity,
         selectedProfileId: selectedProfileId.value,
         selectedServer: selectedServer.value,
         serverVariables: serverVariables.value,

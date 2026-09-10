@@ -52,12 +52,14 @@ beforeEach(() => {
   resetTryItSession()
   resetProfiles()
   window.localStorage.clear()
+  window.sessionStorage.clear()
 })
 
 afterEach(() => {
   resetTryItSession()
   resetProfiles()
   window.localStorage.clear()
+  window.sessionStorage.clear()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -280,6 +282,133 @@ describe('TryItPanel', () => {
     second.unmount()
   })
 
+  it('shows the last response again after the panel is remounted', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: '{"ok":true}',
+        url: 'https://acme.example.com/api/users/42',
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const first = mountPanel()
+    await flushPromises()
+
+    await first.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+
+    expect(first.find('.proxy-response').exists()).toBe(true)
+    first.unmount()
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const second = mountPanel()
+    await flushPromises()
+
+    const response = second.get('.proxy-response')
+    expect(response.text()).toContain('200')
+    expect(response.text()).toContain('https://acme.example.com/api/users/42')
+    second.unmount()
+  })
+
+  it('shows the response headers in a dialog instead of beside the request', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: '{"ok":true}',
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.proxy-response__columns .response-headers').exists()).toBe(false)
+    // The request moved into a dialog of its own too.
+    expect(wrapper.find('[data-testid="expand-request"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="expand-response-headers"]').trigger('click')
+    await flushPromises()
+
+    // The dialog is teleported to the document body, so it is queried there.
+    const dialog = window.document.querySelector('[data-testid="response-headers-expanded"]')
+    expect(dialog?.textContent).toContain('content-type')
+    expect(dialog?.textContent).toContain('application/json')
+    // The body copy action belongs to the body dialog only.
+    expect(window.document.querySelector('[data-testid="copy-response-body-modal"]')).toBeNull()
+
+    window.document.querySelector<HTMLButtonElement>('[data-testid="close-response-body-modal"]')?.click()
+    await flushPromises()
+
+    expect(window.document.querySelector('[data-testid="response-headers-expanded"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('labels an icon-only action on hover outside every clipping card', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({ status: 200, headers: {}, body: '{"ok":true}' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel({ ...document }, operation)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="expand-request"]').trigger('mouseenter')
+
+    // On the document body, not inside the response card: that card clips its overflow.
+    const tooltip = window.document.body.querySelector('.app-tooltip')
+    expect(tooltip?.classList.contains('app-tooltip--visible')).toBe(true)
+    expect(tooltip?.textContent).not.toBe('')
+    expect(tooltip?.closest('.proxy-response')).toBeNull()
+
+    await wrapper.get('[data-testid="expand-request"]').trigger('mouseleave')
+    expect(tooltip?.classList.contains('app-tooltip--visible')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('opens the request payload in its own dialog', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({ status: 200, headers: {}, body: '{"ok":true}' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="expand-request"]').trigger('click')
+    await flushPromises()
+
+    const dialog = window.document.querySelector('[data-testid="request-expanded"]')
+    expect(dialog?.textContent).toContain('"active"')
+    expect(window.document.querySelector('[data-testid="response-body-expanded"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('keeps one operation response out of another operation panel', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({ status: 200, headers: {}, body: '{"ok":true}' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+    wrapper.unmount()
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const other = mountPanel(document, { ...operation, key: 'post:/users/{id}:other' })
+    await flushPromises()
+
+    expect(other.find('.proxy-response').exists()).toBe(false)
+    other.unmount()
+  })
+
   it('keeps one operation form out of another operation form', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
     const wrapper = mountPanel()
@@ -297,6 +426,87 @@ describe('TryItPanel', () => {
 
     expect(other.get<HTMLInputElement>('[data-testid="parameter-path-id"]').element.value).toBe('')
     other.unmount()
+  })
+
+  it('keeps credential-bearing parameters out of web storage while the form still shows them', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const wrapper = mountPanel(secureDocument, secureOperation)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="parameter-query-sort"]').setValue('created_at')
+    await wrapper.get('[data-testid="parameter-header-X-Api-Key"]').setValue('header-secret')
+    await wrapper.get('[data-testid="parameter-query-signature"]').setValue('schema-secret')
+    await wrapper.get('[data-testid="parameter-query-api_token"]').setValue('scheme-secret')
+    await wrapper.vm.$nextTick()
+
+    // Still on screen: the reader is composing this request, only the copy is narrowed.
+    expect(wrapper.get<HTMLInputElement>('[data-testid="parameter-header-X-Api-Key"]').element.value)
+      .toBe('header-secret')
+
+    const persisted = window.localStorage.getItem('api-dock:try-it') ?? ''
+
+    expect(Object.keys(operationInputs.value[secureOperation.key]?.parameters ?? {}))
+      .toEqual(['query:sort'])
+    expect(persisted).toContain('created_at')
+    expect(persisted).not.toContain('header-secret')
+    expect(persisted).not.toContain('schema-secret')
+    expect(persisted).not.toContain('scheme-secret')
+    wrapper.unmount()
+  })
+
+  it('drops a whole body that names a credential and stores an ordinary one verbatim', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-editor"]').setValue('{"email":"a@b.test","password":"hunter2"}')
+
+    // Half a body would restore as a request that cannot be sent, so none of it is kept.
+    expect(operationInputs.value[operation.key]?.body).toBe('')
+    expect(window.localStorage.getItem('api-dock:try-it') ?? '').not.toContain('hunter2')
+
+    await wrapper.get('[data-testid="body-editor"]').setValue('{"q":"laptop"}')
+
+    expect(operationInputs.value[operation.key]?.body).toBe('{"q":"laptop"}')
+    wrapper.unmount()
+  })
+
+  it('stores a masked copy of a response that returned a token and shows the real one', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({
+        status: 200,
+        headers: { 'content-type': 'application/json', 'set-cookie': 'session=abc', 'x-refresh-token': 'cookie-secret' },
+        body: '{"access_token":"real.token.value","user":{"id":7}}',
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+
+    // On screen it is the live response: the capture action needs the real credential.
+    expect(wrapper.get('[data-testid="response-body"]').text()).toContain('real.token.value')
+    expect(wrapper.find('[data-testid="use-token-as-profile"]').exists()).toBe(true)
+
+    const persisted = window.sessionStorage.getItem('api-dock:try-it-response') ?? ''
+
+    expect(persisted).not.toContain('real.token.value')
+    expect(persisted).not.toContain('cookie-secret')
+    expect(persisted).not.toContain('session=abc')
+    expect(persisted).toContain('***')
+    expect(persisted).toContain('content-type')
+    wrapper.unmount()
+
+    // Remounting reads the masked copy back, and the mask is not offered as a token.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
+    const second = mountPanel()
+    await flushPromises()
+
+    expect(second.get('[data-testid="response-body"]').text()).not.toContain('real.token.value')
+    expect(second.find('[data-testid="use-token-as-profile"]').exists()).toBe(false)
+    second.unmount()
   })
 
   it('prefills the body from a referenced schema when the spec ships no example', async () => {
@@ -323,6 +533,30 @@ describe('TryItPanel', () => {
     wrapper.unmount()
   })
 })
+
+const secureDocument: OpenApiDocument = {
+  openapi: '3.1.0',
+  servers: [{ url: 'https://acme.example.com/api' }],
+  paths: {},
+  components: {
+    securitySchemes: {
+      queryKey: { type: 'apiKey', in: 'query', name: 'api_token' },
+    },
+  },
+}
+
+const secureOperation: OperationEntry = {
+  key: 'get:/reports',
+  method: 'get',
+  path: '/reports',
+  operation: { operationId: 'listReports', responses: { '200': { description: 'OK' } } },
+  parameters: [
+    { name: 'sort', in: 'query', schema: { type: 'string', default: 'name' } },
+    { name: 'X-Api-Key', in: 'header', schema: { type: 'string' } },
+    { name: 'signature', in: 'query', schema: { type: 'string', format: 'password' } },
+    { name: 'api_token', in: 'query', schema: { type: 'string' } },
+  ],
+}
 
 const schemaDocument: OpenApiDocument = {
   openapi: '3.1.0',

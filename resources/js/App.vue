@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
+import ChangelogPanel from '@/components/ChangelogPanel.vue'
 import EndpointSidebar from '@/components/EndpointSidebar.vue'
 import OperationDetail from '@/components/OperationDetail.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
-import { closeSettings, settingsOpen } from '@/lib/appView'
+import { changelogOpen, closeSettings, settingsOpen } from '@/lib/appView'
 import { LOCALE_LABELS, locale, setLocale, SUPPORTED_LOCALES, t } from '@/lib/i18n'
 import {
   collectOperations,
@@ -91,8 +92,8 @@ async function loadSpec(): Promise<void> {
 }
 
 function selectOperation(entry: OperationEntry, replace = false): void {
-  // Picking an operation leaves the settings view: the reader asked for that endpoint,
-  // not for the panel they opened settings from.
+  // Picking an operation leaves whichever panel is open: the reader asked for that
+  // endpoint, not for the settings or changelog page they came from.
   closeSettings()
   selectedKey.value = entry.key
   const hash = encodeOperationHash(entry.key)
@@ -184,8 +185,13 @@ function isOpenApiDocument(payload: unknown): payload is OpenApiDocument {
             </button>
           </div>
 
+          <ChangelogPanel
+            v-if="changelogOpen"
+            :document="document"
+            @select="selectOperation"
+          />
           <SettingsPanel
-            v-if="settingsOpen"
+            v-else-if="settingsOpen"
             :document="document"
             :base-url="baseUrl"
             :csrf-token="csrfToken"

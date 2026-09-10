@@ -4,16 +4,22 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import JsonTree from '@/components/JsonTree.vue'
 import { openSettings } from '@/lib/appView'
 import { t } from '@/lib/i18n'
+import { keepTabInside } from '@/lib/modalFocus'
 import { isReference, resolvePointer, resolveSchema, sampleFromSchema } from '@/lib/schema'
 import {
+  createProfile,
   loadProfiles,
   loadingProfiles,
   profileDenied,
   profileError,
   profiles,
 } from '@/lib/tryItProfiles'
+import { REDACTED, extractToken } from '@/lib/tryItToken'
 import type { StoredTryItProfile } from '@/lib/tryItProfiles'
+import { vTooltip } from '@/lib/tooltip'
+import { setStoredResponse, storedResponse } from '@/lib/tryItResponses'
 import {
+  classifyInputs,
   ensureServerVariables,
   plainBaseUrl as storedPlainBaseUrl,
   selectedProfileId as storedSelectedProfileId,
@@ -51,7 +57,6 @@ const BODYLESS_METHODS = new Set(['GET', 'HEAD'])
 // there, so offering it here would only produce a 422 from the proxy.
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']
 const FALLBACK_METHOD = 'GET'
-const MODAL_FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 const props = withDefaults(
   defineProps<{
@@ -113,12 +118,23 @@ const selectedProfileId = computed({
 const sendDenied = ref('')
 const sending = ref(false)
 const requestError = ref('')
-const responseResult = ref<ProxyResult>()
-const elapsedMs = ref<number>()
+// The last response this operation gave, so coming back to the endpoint does not
+// look like the request was never sent. Same read-once reasoning as the form values.
+const rememberedResponse = storedResponse(props.operation.key)
+const responseResult = ref<ProxyResult | undefined>(rememberedResponse)
+const elapsedMs = ref<number | undefined>(rememberedResponse?.elapsedMs)
 const copied = ref<'curl' | 'body' | ''>('')
-const bodyExpanded = ref(false)
+const savingToken = ref(false)
+// Reset with every send below, so the confirmation belongs to the response on screen
+// rather than to a profile made from an earlier one.
+const tokenSaved = ref(false)
+// Which dialog is open, if any. One at a time by construction: both use the same overlay,
+// so the focus trap below has a single panel to keep the tab ring inside.
+const expandedPanel = ref<'body' | 'headers' | 'request' | ''>('')
 const closeModalButton = ref<HTMLButtonElement>()
-const expandButton = ref<HTMLButtonElement>()
+// The control that opened the dialog, captured on click rather than held as a ref per
+// button: focus has to return to whichever one was used.
+const modalTrigger = ref<HTMLElement>()
 const modalPanel = ref<HTMLElement>()
 
 // Either endpoint answering 403 means the same thing: try-it is switched off for this
@@ -187,6 +203,21 @@ const visibleBodyJson = computed<{ valid: boolean; value?: unknown }>(() => {
     return { valid: false }
   }
 })
+// Offered on a successful response only: a 401 body naming a `token` field is describing
+// what it wanted, not handing one over.
+const capturedToken = computed(() => {
+  const result = responseResult.value
+
+  if (!result || result.status < 200 || result.status >= 300 || result.truncated) {
+    return null
+  }
+
+  const token = extractToken(result.body)
+
+  // A response restored from storage is the masked copy, so its "token" is the mask:
+  // offering it would create a profile whose credential is three asterisks.
+  return token === REDACTED ? null : token
+})
 const requestPayload = computed(() => {
   if (!bodyless.value && !bodyParse.value.error) {
     return bodyText.value
@@ -196,6 +227,13 @@ const requestPayload = computed(() => {
     ...parameterRecord(parameters.value, 'path'),
     ...parameterRecord(parameters.value, 'query'),
   }, null, 2) ?? '{}'
+})
+const modalTitle = computed(() => {
+  if (expandedPanel.value === 'headers') {
+    return t('tryIt.responseHeaders')
+  }
+
+  return expandedPanel.value === 'request' ? t('tryIt.request') : t('tryIt.responseBody')
 })
 const visibleResponseHeaders = computed(() =>
   Object.entries(responseResult.value?.headers ?? {}).slice(0, RESPONSE_HEADER_LIMIT),
@@ -226,13 +264,19 @@ watch(selectedProfile, (profile, previous) => {
 // Remember the composed request as it is typed, so leaving the endpoint and coming
 // back — or reloading the page — does not hand the reader an empty form again.
 // `deep` because the values live inside the parameter objects, not in the array.
+// Everything goes through `classifyInputs` first: the form on screen keeps the
+// credential the reader typed, the copy that outlives the tab never receives it.
 watch([parameters, bodyText], () => {
-  setOperationInputs(props.operation.key, {
-    parameters: Object.fromEntries(
-      parameters.value.map((parameter) => [parameterMemoryKey(parameter), parameter.value]),
-    ),
-    body: bodyText.value,
-  })
+  setOperationInputs(props.operation.key, classifyInputs(
+    {
+      parameters: Object.fromEntries(
+        parameters.value.map((parameter) => [parameterMemoryKey(parameter), parameter.value]),
+      ),
+      body: bodyText.value,
+    },
+    parameters.value,
+    props.document.components?.securitySchemes,
+  ))
 }, { deep: true })
 
 // One fetch per mount and no polling: the list is shared module state, so what the
@@ -248,6 +292,10 @@ async function sendRequest(): Promise<void> {
   requestError.value = ''
   responseResult.value = undefined
   elapsedMs.value = undefined
+  tokenSaved.value = false
+  // Dropped before the request goes out: a failed send must not leave the previous
+  // response behind to be shown again on the next visit as if it were this one's.
+  setStoredResponse(props.operation.key, undefined)
   const startedAt = performance.now()
   const payload: Record<string, unknown> = {
     method: method.value,
@@ -294,6 +342,10 @@ async function sendRequest(): Promise<void> {
     }
 
     responseResult.value = normalizeProxyResult(responsePayload)
+    setStoredResponse(props.operation.key, {
+      ...responseResult.value,
+      elapsedMs: elapsedMs.value ?? 0,
+    })
   } catch {
     elapsedMs.value = Math.round((performance.now() - startedAt) * 10) / 10
     requestError.value = t('tryIt.sendError')
@@ -315,51 +367,58 @@ async function copyResponseBody(): Promise<void> {
   copied.value = 'body'
 }
 
-function closeBodyModal(): void {
-  bodyExpanded.value = false
+/**
+ * Turns the token this response returned into a bearer profile and selects it, so every
+ * following request carries it. The credential goes straight to the profile endpoint —
+ * it is never written to web storage, and the panel only ever sees the masked hint back.
+ */
+async function useTokenAsProfile(): Promise<void> {
+  if (capturedToken.value === null || savingToken.value) {
+    return
+  }
+
+  savingToken.value = true
+
+  try {
+    const created = await createProfile({ baseUrl: props.baseUrl, csrfToken: props.csrfToken }, {
+      // The profile endpoint caps a label at 64 characters and this action has no label
+      // field to shorten it in, so a long path is cut here rather than answered with 422.
+      label: t('tryIt.tokenProfileLabel', { path: props.operation.path }).slice(0, 64),
+      baseUrl: resolvedBaseUrl.value,
+      serverVariables: applicableServerVariables.value,
+      scheme: 'bearer',
+      credential: capturedToken.value,
+      credentialHeader: '',
+    })
+
+    tokenSaved.value = created !== null
+  } finally {
+    savingToken.value = false
+  }
 }
 
-// The overlay hides the page behind it, so a Tab that walked out of the dialog would move
-// focus to a control nobody can see. `aria-modal` only tells assistive technology that the
-// rest of the page is inert; keeping the tab ring inside is this handler's job.
+function openModal(panel: 'body' | 'headers' | 'request', event: MouseEvent): void {
+  modalTrigger.value = event.currentTarget as HTMLElement
+  expandedPanel.value = panel
+}
+
+function closeBodyModal(): void {
+  expandedPanel.value = ''
+}
+
 function handleModalKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     closeBodyModal()
     return
   }
 
-  if (event.key !== 'Tab' || !modalPanel.value) {
-    return
-  }
-
-  const focusable = Array.from(
-    modalPanel.value.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR),
-  ).filter((element) => element.offsetParent !== null || element === document.activeElement)
-
-  if (focusable.length === 0) {
-    event.preventDefault()
-    return
-  }
-
-  const first = focusable[0]
-  const last = focusable[focusable.length - 1]
-  const active = document.activeElement
-  const outside = !(active instanceof HTMLElement) || !modalPanel.value.contains(active)
-
-  if (event.shiftKey && (outside || active === first)) {
-    event.preventDefault()
-    last.focus()
-    return
-  }
-
-  if (!event.shiftKey && (outside || active === last)) {
-    event.preventDefault()
-    first.focus()
+  if (event.key === 'Tab' && modalPanel.value) {
+    keepTabInside(event, modalPanel.value)
   }
 }
 
-watch(bodyExpanded, async (open) => {
-  if (open) {
+watch(expandedPanel, async (panel) => {
+  if (panel !== '') {
     window.addEventListener('keydown', handleModalKeydown)
     // Focus moves into the modal so the keyboard reader lands on the control that closes it
     // instead of continuing through the page behind the overlay.
@@ -374,8 +433,8 @@ watch(bodyExpanded, async (open) => {
   // is still on the page.
   await nextTick()
 
-  if (expandButton.value?.isConnected) {
-    expandButton.value.focus()
+  if (modalTrigger.value?.isConnected) {
+    modalTrigger.value.focus()
   }
 })
 
@@ -617,26 +676,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
           <span class="status-code" :data-success="responseResult.status >= 200 && responseResult.status < 300">{{ responseResult.status }}</span>
           <code>{{ responseResult.url }}</code>
           <span class="proxy-response__timing">{{ elapsedMs }} ms</span>
+          <button v-if="capturedToken" type="button" class="code-copy-button" :disabled="savingToken" v-tooltip="tokenSaved ? t('tryIt.tokenProfileCreated') : t('tryIt.useTokenAsProfile')" :aria-label="tokenSaved ? t('tryIt.tokenProfileCreated') : t('tryIt.useTokenAsProfile')" data-testid="use-token-as-profile" @click="useTokenAsProfile">
+            <i :class="tokenSaved ? 'pi pi-check' : 'pi pi-key'" />
+          </button>
+          <button type="button" class="code-copy-button" v-tooltip="t('tryIt.request')" :aria-label="t('tryIt.request')" data-testid="expand-request" @click="openModal('request', $event)">
+            <i class="pi pi-send" />
+          </button>
+          <button v-if="visibleResponseHeaders.length" type="button" class="code-copy-button" v-tooltip="t('tryIt.responseHeaders')" :aria-label="t('tryIt.responseHeaders')" data-testid="expand-response-headers" @click="openModal('headers', $event)">
+            <i class="pi pi-list" />
+          </button>
         </div>
         <p v-if="responseResult.truncated" class="truncation-notice">{{ t('tryIt.proxyTruncated') }}</p>
         <div class="proxy-response__columns">
-          <div class="proxy-response__request">
-            <span v-if="visibleResponseHeaders.length" class="panel-label">{{ t('tryIt.responseHeaders') }}</span>
-            <div v-if="visibleResponseHeaders.length" class="response-headers">
-              <div v-for="([name, value]) in visibleResponseHeaders" :key="name"><code>{{ name }}</code><span>{{ value }}</span></div>
-            </div>
-            <p v-if="Object.keys(responseResult.headers).length > RESPONSE_HEADER_LIMIT" class="truncation-notice">{{ t('tryIt.responseHeadersTruncated', { limit: RESPONSE_HEADER_LIMIT }) }}</p>
-            <span class="panel-label proxy-response__request-label">{{ t('tryIt.request') }}</span>
-            <pre>{{ requestPayload }}</pre>
-          </div>
           <div class="proxy-response__result">
             <div class="proxy-response__result-header">
               <span class="panel-label">{{ t('tryIt.responseBody') }}</span>
               <div class="proxy-response__result-actions">
-                <button type="button" class="code-copy-button" :title="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" :aria-label="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" data-testid="copy-response-body" @click="copyResponseBody">
+                <button type="button" class="code-copy-button" v-tooltip="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" :aria-label="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" data-testid="copy-response-body" @click="copyResponseBody">
                   <i :class="copied === 'body' ? 'pi pi-check' : 'pi pi-copy'" />
                 </button>
-                <button type="button" class="code-copy-button" :title="t('tryIt.expandResponseBody')" :aria-label="t('tryIt.expandResponseBody')" ref="expandButton" data-testid="expand-response-body" @click="bodyExpanded = true">
+                <button type="button" class="code-copy-button" v-tooltip="t('tryIt.expandResponseBody')" :aria-label="t('tryIt.expandResponseBody')" data-testid="expand-response-body" @click="openModal('body', $event)">
                   <i class="pi pi-window-maximize" />
                 </button>
               </div>
@@ -649,24 +708,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
       </div>
 
       <Teleport to="body">
-        <div v-if="bodyExpanded" class="body-modal" data-testid="response-body-modal" @click.self="closeBodyModal">
-          <div ref="modalPanel" class="body-modal__panel" role="dialog" aria-modal="true" :aria-label="t('tryIt.responseBody')">
+        <div v-if="expandedPanel" class="body-modal" data-testid="response-body-modal" @click.self="closeBodyModal">
+          <div ref="modalPanel" class="body-modal__panel" role="dialog" aria-modal="true" :aria-label="modalTitle">
             <header class="body-modal__header">
-              <span class="panel-label">{{ t('tryIt.responseBody') }}</span>
+              <span class="panel-label">{{ modalTitle }}</span>
               <div class="proxy-response__result-actions">
-                <button type="button" class="code-copy-button" :title="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" :aria-label="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" data-testid="copy-response-body-modal" @click="copyResponseBody">
+                <button v-if="expandedPanel === 'body'" type="button" class="code-copy-button" v-tooltip="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" :aria-label="copied === 'body' ? t('tryIt.copied') : t('tryIt.copyResponseBody')" data-testid="copy-response-body-modal" @click="copyResponseBody">
                   <i :class="copied === 'body' ? 'pi pi-check' : 'pi pi-copy'" />
                 </button>
-                <button type="button" class="code-copy-button" :title="t('common.close')" :aria-label="t('common.close')" ref="closeModalButton" data-testid="close-response-body-modal" @click="closeBodyModal">
+                <button type="button" class="code-copy-button" v-tooltip="t('common.close')" :aria-label="t('common.close')" ref="closeModalButton" data-testid="close-response-body-modal" @click="closeBodyModal">
                   <i class="pi pi-times" />
                 </button>
               </div>
             </header>
             <div class="body-modal__content">
-              <JsonTree v-if="visibleBodyJson.valid" data-testid="response-body-expanded" :value="visibleBodyJson.value" />
-              <pre v-else data-testid="response-body-expanded">{{ visibleBody }}</pre>
+              <template v-if="expandedPanel === 'headers'">
+                <div class="response-headers" data-testid="response-headers-expanded">
+                  <div v-for="([name, value]) in visibleResponseHeaders" :key="name"><code>{{ name }}</code><span>{{ value }}</span></div>
+                </div>
+                <p v-if="Object.keys(responseResult?.headers ?? {}).length > RESPONSE_HEADER_LIMIT" class="truncation-notice">{{ t('tryIt.responseHeadersTruncated', { limit: RESPONSE_HEADER_LIMIT }) }}</p>
+              </template>
+              <template v-else-if="expandedPanel === 'request'">
+                <pre data-testid="request-expanded">{{ requestPayload }}</pre>
+              </template>
+              <template v-else>
+                <JsonTree v-if="visibleBodyJson.valid" data-testid="response-body-expanded" :value="visibleBodyJson.value" />
+                <pre v-else data-testid="response-body-expanded">{{ visibleBody }}</pre>
+              </template>
             </div>
-            <p v-if="bodyWasDomTruncated" class="truncation-notice body-modal__notice">{{ t('tryIt.responseBodyTruncated', { limit: RESPONSE_BODY_LIMIT }) }}</p>
+            <p v-if="expandedPanel === 'body' && bodyWasDomTruncated" class="truncation-notice body-modal__notice">{{ t('tryIt.responseBodyTruncated', { limit: RESPONSE_BODY_LIMIT }) }}</p>
           </div>
         </div>
       </Teleport>

@@ -127,6 +127,9 @@ to learn what moved.
 - Never rewrite or delete a past entry. History is append-only; a correction is a
   new entry.
 - The first entry of an endpoint's life is its introduction.
+- Entries are read twice: on the operation's own AI panel, and aggregated by date
+  on the panel's **Changelog** page, which is the whole API's history in one list.
+  Write the summary so it still makes sense away from its endpoint.
 
 ### `AiTool(bool $enabled = true, ?string $name = null, ?string $description = null)`
 

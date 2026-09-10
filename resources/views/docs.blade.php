@@ -6,6 +6,18 @@
     // this request's storage will keep: with persistence on, a credential outlives
     // logout and is shared across the user's sessions.
     $profileStorage = \LvntR\ApiDock\Support\AuthProfileStore::storageModeForCurrentRequest();
+    // Which account the browser's stored try-it state belongs to. An opaque stamp, not
+    // the id: the browser only has to tell one account apart from another, and the id
+    // itself would be a gratuitous disclosure. Guests get '', so they share as before.
+    // Guard-namespaced for the same reason AuthProfileStore::userCacheKey() is — two
+    // guards can resolve two different people to the same id.
+    $identity = \Illuminate\Support\Facades\Auth::id();
+    $identity = is_string($identity) || is_int($identity) ? (string) $identity : '';
+    $identity = $identity === '' ? '' : substr(hash_hmac(
+        'sha256',
+        (string) config('auth.defaults.guard', 'web').':'.$identity,
+        (string) config('app.key'),
+    ), 0, 16);
 @endphp
 <!DOCTYPE html>
 <html lang="{{ $locale }}">
@@ -26,6 +38,7 @@
         data-theme="{{ $theme }}"
         data-version="{{ \LvntR\ApiDock\ApiDockServiceProvider::version() }}"
         data-profile-storage="{{ $profileStorage }}"
+        data-identity="{{ $identity }}"
         @if ($profileStorage === \LvntR\ApiDock\Support\AuthProfileStore::MODE_PERSISTENT)
         data-profile-lifetime-minutes="{{ \LvntR\ApiDock\Support\AuthProfileStore::persistenceTtl() }}"
         @endif

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import JsonTree from '@/components/JsonTree.vue'
 import { t } from '@/lib/i18n'
+import { keepTabInside } from '@/lib/modalFocus'
+import { vTooltip } from '@/lib/tooltip'
 import { isReference, resolvePointer } from '@/lib/schema'
 import type {
   OpenApiDocument,
@@ -21,6 +23,51 @@ const props = defineProps<{
 }>()
 
 const copied = ref<'prompt' | 'mcp' | 'llms' | ''>('')
+const expandedExample = ref<{ title: string; json: string; tree: boolean } | null>(null)
+const modalPanel = ref<HTMLElement>()
+const closeModalButton = ref<HTMLButtonElement>()
+let modalTrigger: HTMLElement | null = null
+
+function openExample(event: MouseEvent, title: string, value: unknown, tree: boolean): void {
+  modalTrigger = event.currentTarget as HTMLElement
+  expandedExample.value = { title, json: boundedJson(value), tree }
+}
+
+function closeExample(): void {
+  expandedExample.value = null
+}
+
+function onModalKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    closeExample()
+    return
+  }
+
+  if (event.key === 'Tab' && modalPanel.value) {
+    keepTabInside(event, modalPanel.value)
+  }
+}
+
+// Same contract as the try-it dialog: focus lands on the close control when the dialog
+// opens and goes back to the trigger when it closes, so a keyboard reader never keeps
+// tabbing through the page behind the overlay.
+watch(expandedExample, async (panel) => {
+  if (panel) {
+    document.addEventListener('keydown', onModalKeydown)
+    await nextTick()
+    closeModalButton.value?.focus()
+    return
+  }
+
+  document.removeEventListener('keydown', onModalKeydown)
+  await nextTick()
+
+  if (modalTrigger?.isConnected) {
+    modalTrigger.focus()
+  }
+})
+
+onBeforeUnmount(() => document.removeEventListener('keydown', onModalKeydown))
 const hint = computed(() => props.operation.operation['x-ai-hint'])
 const pitfalls = computed(() => props.operation.operation['x-ai-pitfalls'] ?? [])
 const examples = computed(() => props.operation.operation['x-ai-examples'] ?? [])
@@ -476,15 +523,30 @@ function prettyJson(value: unknown): string {
         <summary>
           <i class="pi pi-chevron-right" />
           <span>{{ example.name }}</span>
+          <span class="ai-example__actions">
+            <button
+              type="button"
+              class="code-copy-button"
+              v-tooltip="t('ai.request')"
+              :aria-label="t('ai.request')"
+              data-testid="expand-example-request"
+              @click.stop.prevent="openExample($event, t('ai.request'), example.request, false)"
+            >
+              <i class="pi pi-send" />
+            </button>
+            <button
+              type="button"
+              class="code-copy-button"
+              v-tooltip="t('ai.response')"
+              :aria-label="t('ai.response')"
+              data-testid="expand-example-response"
+              @click.stop.prevent="openExample($event, t('ai.response'), example.response, true)"
+            >
+              <i class="pi pi-window-maximize" />
+            </button>
+          </span>
         </summary>
         <div class="ai-example__columns">
-          <div class="ai-example__request">
-            <span class="panel-label">{{ t('ai.request') }}</span>
-            <pre>{{ boundedJson(example.request) }}</pre>
-            <p v-if="isRenderedJsonTruncated(example.request)" class="truncation-notice">
-              {{ t('ai.renderTruncated', { limit: RENDER_LIMIT }) }}
-            </p>
-          </div>
           <div class="ai-example__response">
             <span class="panel-label">{{ t('ai.response') }}</span>
             <JsonTree :source="boundedJson(example.response)" />
@@ -495,6 +557,25 @@ function prettyJson(value: unknown): string {
         </div>
       </details>
     </div>
+
+    <Teleport to="body">
+      <div v-if="expandedExample" class="body-modal" data-testid="ai-example-modal" @click.self="closeExample">
+        <div ref="modalPanel" class="body-modal__panel" role="dialog" aria-modal="true" :aria-label="expandedExample.title">
+          <header class="body-modal__header">
+            <span class="panel-label">{{ expandedExample.title }}</span>
+            <div class="proxy-response__result-actions">
+              <button ref="closeModalButton" type="button" class="code-copy-button" v-tooltip="t('common.close')" :aria-label="t('common.close')" data-testid="close-ai-example-modal" @click="closeExample">
+                <i class="pi pi-times" />
+              </button>
+            </div>
+          </header>
+          <div class="body-modal__content">
+            <JsonTree v-if="expandedExample.tree" :source="expandedExample.json" />
+            <pre v-else>{{ expandedExample.json }}</pre>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <div class="artifact-actions">
       <button class="button button--quiet" type="button" @click="copy('mcp', mcpTool)">

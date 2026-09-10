@@ -65,6 +65,65 @@ describe('try-it session persistence', () => {
     expect(JSON.parse(lastStoredValue(storage))).toMatchObject({ selectedProfileId: '' })
   })
 
+  it('purges state another account left in this browser', async () => {
+    const storage = storageStub(JSON.stringify({
+      identity: 'account-a',
+      selectedProfileId: 'profile-1',
+      selectedServer: 'https://{tenant}.example.com/api',
+      serverVariables: { tenant: 'acme' },
+      plainBaseUrl: 'https://staging.example.com/api',
+      operations: { 'get:/orders': { parameters: { status: 'paid' }, body: '' } },
+    }))
+    vi.stubGlobal('localStorage', storage)
+    const session = await import('@/lib/tryItSession')
+    expect(session.selectedProfileId.value).toBe('profile-1')
+
+    session.bindIdentity('account-b')
+
+    expect(storage.getItem(STORAGE_KEY)).toBeNull()
+    expect(session.selectedProfileId.value).toBe('')
+    expect(session.selectedServer.value).toBe('')
+    expect(session.serverVariables.value).toEqual({})
+    expect(session.plainBaseUrl.value).toBe('')
+    expect(session.operationInputs.value).toEqual({})
+  })
+
+  it('purges an envelope written before identities were stamped', async () => {
+    // Nothing proves an unstamped envelope belongs to whoever is reading now, so even
+    // a guest — whose own stamp is '' — does not inherit it.
+    const storage = storageStub(JSON.stringify({
+      selectedProfileId: 'profile-1',
+      plainBaseUrl: 'https://staging.example.com/api',
+    }))
+    vi.stubGlobal('localStorage', storage)
+    const session = await import('@/lib/tryItSession')
+
+    session.bindIdentity('')
+
+    expect(storage.getItem(STORAGE_KEY)).toBeNull()
+    expect(session.selectedProfileId.value).toBe('')
+    expect(session.plainBaseUrl.value).toBe('')
+  })
+
+  it('keeps the state the bound account itself stored', async () => {
+    const storage = storageStub(JSON.stringify({
+      identity: 'account-a',
+      selectedProfileId: 'profile-1',
+      plainBaseUrl: 'https://staging.example.com/api',
+    }))
+    vi.stubGlobal('localStorage', storage)
+    const session = await import('@/lib/tryItSession')
+
+    session.bindIdentity('account-a')
+    session.setSelectedServer('https://api.example.com')
+
+    expect(session.selectedProfileId.value).toBe('profile-1')
+    expect(JSON.parse(lastStoredValue(storage))).toMatchObject({
+      identity: 'account-a',
+      selectedProfileId: 'profile-1',
+    })
+  })
+
   it('never writes credentials, credential header values, or credential hints to storage', async () => {
     const rawCredential = 'raw-super-secret'
     const credentialHeaderValue = 'X-Api-Key raw-header-secret'
@@ -85,6 +144,7 @@ describe('try-it session persistence', () => {
 
     const serialized = lastStoredValue(storage)
     expect(JSON.parse(serialized)).toEqual({
+      identity: '',
       selectedProfileId: 'profile-2',
       selectedServer: 'https://{tenant}.example.com/api',
       serverVariables: { tenant: 'acme' },

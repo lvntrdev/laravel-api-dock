@@ -157,6 +157,9 @@ export const en = {
   'tryIt.currentCurl': 'Current curl sample',
   'tryIt.copyCurl': 'Copy curl',
   'tryIt.copied': 'Copied',
+  'tryIt.useTokenAsProfile': 'Use this token for the next requests',
+  'tryIt.tokenProfileCreated': 'Token saved as a profile and selected',
+  'tryIt.tokenProfileLabel': 'Token from {path}',
   'tryIt.credentialNote': 'The sample contains only {hint}. The real credential is held server-side; substitute your own credential when running it elsewhere.',
   'tryIt.request': 'Request',
   'tryIt.responseHeaders': 'Response headers',
@@ -168,6 +171,13 @@ export const en = {
   'tryIt.responseBodyTruncated': 'Showing the first {limit} characters to keep this page responsive.',
 
   // Settings
+  // API changelog
+  'changelog.kicker': 'Contract history',
+  'changelog.title': 'Changelog',
+  'changelog.description': 'Every documented contract change, newest first. Entries come from the AiChangelog attributes on the operations themselves.',
+  'changelog.summary': '{entries} entries · {breaking} breaking',
+  'changelog.empty': 'No changelog entries yet.',
+
   'settings.title': 'Settings',
   'settings.intro': 'Profiles, the request target and how to use the package live here.',
   'settings.profilesTitle': 'Profiles',
@@ -413,6 +423,9 @@ export const tr: Record<MessageKey, string> = {
   'tryIt.currentCurl': 'Geçerli curl örneği',
   'tryIt.copyCurl': 'curl komutunu kopyala',
   'tryIt.copied': 'Kopyalandı',
+  'tryIt.useTokenAsProfile': 'Bu token\'ı sonraki isteklerde kullan',
+  'tryIt.tokenProfileCreated': 'Token profil olarak kaydedildi ve seçildi',
+  'tryIt.tokenProfileLabel': '{path} token\'ı',
   'tryIt.credentialNote': 'Örnek yalnızca {hint} içerir. Gerçek kimlik bilgisi sunucu tarafında tutulur; başka bir yerde çalıştırırken kendi kimlik bilginizi kullanın.',
   'tryIt.request': 'İstek',
   'tryIt.responseHeaders': 'Yanıt header’ları',
@@ -424,6 +437,13 @@ export const tr: Record<MessageKey, string> = {
   'tryIt.responseBodyTruncated': 'Sayfanın yanıt verebilir kalması için ilk {limit} karakter gösteriliyor.',
 
   // Settings
+  // API changelog
+  'changelog.kicker': 'Sözleşme geçmişi',
+  'changelog.title': 'Değişiklik günlüğü',
+  'changelog.description': 'Belgelenmiş tüm sözleşme değişiklikleri, en yeniden eskiye. Kayıtlar operasyonlardaki AiChangelog niteliklerinden gelir.',
+  'changelog.summary': '{entries} kayıt · {breaking} kırıcı',
+  'changelog.empty': 'Henüz değişiklik kaydı yok.',
+
   'settings.title': 'Ayarlar',
   'settings.intro': 'Profiller, istek hedefi ve paketin nasıl kullanılacağı burada.',
   'settings.profilesTitle': 'Profiller',

@@ -41,6 +41,21 @@ function apiDockSecurityResolvesTo(array $addresses): void
     ));
 }
 
+/**
+ * Resolver that answers PER HOST, so a subdomain can point somewhere its parent
+ * does not — the whole question the self-host address gate has to decide. A
+ * host the map does not name resolves to nothing and is denied on that alone.
+ *
+ * @param  array<string, list<string>>  $map
+ */
+function apiDockSecurityResolvesPerHost(array $map): void
+{
+    app()->bind(OutboundRequestGuard::class, static fn ($app): OutboundRequestGuard => new OutboundRequestGuard(
+        $app->make(HttpFactory::class),
+        static fn (string $host): array => $map[$host] ?? [],
+    ));
+}
+
 /** Resolver that answers with the host itself, for IP-literal targets. */
 function apiDockSecurityResolvesToItself(): void
 {
@@ -288,7 +303,7 @@ it('reaches the application own host with no allowlist entry at all', function (
 
     // Herd and every other local stack answer on loopback; refusing that would
     // make try-it useless exactly where it is used most.
-    resolvesTo(['127.0.0.1']);
+    apiDockSecurityResolvesTo(['127.0.0.1']);
 
     Http::fake(['*' => Http::response('{"ok":true}', 200)]);
 
@@ -302,7 +317,13 @@ it('reaches a tenant subdomain of the application host with no allowlist entry',
     config()->set('api-dock.try_it.allowed_hosts', []);
     config()->set('app.url', 'https://congress-app.test');
 
-    resolvesTo(['127.0.0.1']);
+    // Was a single resolver answering 127.0.0.1 for every host, which made the
+    // tenant share the app's address by accident. Spelled out now, because that
+    // sharing is precisely what earns the exemption.
+    apiDockSecurityResolvesPerHost([
+        'congress-app.test' => ['127.0.0.1'],
+        'test-kurum.congress-app.test' => ['127.0.0.1'],
+    ]);
 
     Http::fake(['*' => Http::response('{"ok":true}', 200)]);
 
@@ -310,6 +331,123 @@ it('reaches a tenant subdomain of the application host with no allowlist entry',
         'method' => 'GET',
         'url' => 'https://test-kurum.congress-app.test/api/things',
     ])->assertOk();
+});
+
+it('reaches a tenant subdomain that answers at the application own address', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://example.com');
+
+    // Same server, second label: the tenant is this application, so it keeps the
+    // exemption even at an address the class gate would otherwise refuse.
+    apiDockSecurityResolvesPerHost([
+        'example.com' => ['203.0.113.10'],
+        'tenant.example.com' => ['203.0.113.10'],
+    ]);
+
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://tenant.example.com/api/things',
+    ])->assertOk()->assertJsonPath('status', 200);
+
+    Http::assertSent(static fn (ClientRequest $request): bool => $request->url() === 'https://tenant.example.com/api/things');
+});
+
+it('does not let a subdomain of the application host reach an internal address', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://example.com');
+
+    // The suffix is the app's; the address is not. Anyone who can publish one
+    // record under the apex would otherwise have had the whole private range,
+    // which is the reach the exemption was never meant to hand out.
+    apiDockSecurityResolvesPerHost([
+        'example.com' => ['203.0.113.10'],
+        'internal.example.com' => ['10.0.0.5'],
+    ]);
+
+    Http::fake();
+
+    $response = $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://internal.example.com/things',
+    ]);
+
+    $response->assertStatus(422);
+
+    // The refusal names the host; quoting the address back would answer the
+    // internal-network question the boundary just declined to answer.
+    expect((string) $response->json('message'))
+        ->toContain('internal.example.com')
+        ->not->toContain('10.0.0.5');
+
+    Http::assertNothingSent();
+});
+
+it('does not exempt a subdomain that answers at the application address and one more', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://example.com');
+
+    // A superset is not the same set. With one shared record accepted as proof,
+    // a second A record pointing inward would ride in beside it — and cURL is
+    // pinned to BOTH addresses, so the internal one is genuinely reachable.
+    apiDockSecurityResolvesPerHost([
+        'example.com' => ['203.0.113.10'],
+        'tenant.example.com' => ['203.0.113.10', '10.0.0.5'],
+    ]);
+
+    Http::fake();
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://tenant.example.com/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
+});
+
+it('reaches a tenant subdomain of a loopback application host', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'http://localhost:8000');
+
+    // The local-stack shape, and the one the narrowing must not break: both
+    // names are loopback, `.localhost` is on the internal-suffix list, and the
+    // port comes from the entry. Only the shared address makes it self.
+    apiDockSecurityResolvesPerHost([
+        'localhost' => ['127.0.0.1'],
+        'tenant.localhost' => ['127.0.0.1'],
+    ]);
+
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'http://tenant.localhost:8000/api/things',
+    ])->assertOk()->assertJsonPath('status', 200);
+
+    Http::assertSent(static fn (ClientRequest $request): bool => $request->url() === 'http://tenant.localhost:8000/api/things');
+});
+
+it('gives an address literal self entry no descendants', function (): void {
+    config()->set('api-dock.try_it.allowed_hosts', []);
+    config()->set('app.url', 'https://congress-app.test');
+    config()->set('api-dock.try_it.self_hosts', ['10.0.0.5']);
+
+    // The entry is dropped before any matching happens, so the name below is a
+    // foreign host — not a descendant whose addresses get compared to it.
+    apiDockSecurityResolvesPerHost([
+        '10.0.0.5' => ['10.0.0.5'],
+        'internal.10.0.0.5' => ['10.0.0.5'],
+    ]);
+
+    Http::fake();
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://internal.10.0.0.5/things',
+    ])->assertStatus(422);
+
+    Http::assertNothingSent();
 });
 
 it('still denies a foreign host that merely resembles the application host', function (): void {
@@ -330,7 +468,7 @@ it('does not let the self host exemption reach an unrelated private address', fu
     config()->set('api-dock.try_it.allowed_hosts', []);
     config()->set('app.url', 'https://congress-app.test');
 
-    resolvesTo(['169.254.169.254']);
+    apiDockSecurityResolvesTo(['169.254.169.254']);
 
     Http::fake();
 
@@ -901,4 +1039,94 @@ it('does not send a request for a template that still carries a placeholder', fu
     expect((string) $response->json('message'))->toContain('unsubstituted placeholder');
 
     Http::assertNothingSent();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Egress proxy
+|--------------------------------------------------------------------------
+|
+| The pinned address is only a pin while nothing connects on this server's
+| behalf. An inherited environment proxy would resolve the name a second time,
+| so the boundary disables it on both layers and accepts only a proxy the
+| operator declared — never one that resolves remotely.
+|
+*/
+
+it('sends no ambient environment proxy with the outbound proxy request', function (): void {
+    putenv('HTTP_PROXY=http://ambient.test:3128');
+    putenv('HTTPS_PROXY=http://ambient.test:3128');
+
+    try {
+        $captured = null;
+
+        Http::fake(function (ClientRequest $request, array $options) use (&$captured) {
+            $captured = $options;
+
+            return Http::response('{"ok":true}', 200);
+        });
+
+        $this->postJson('/api-dock/try-it', [
+            'method' => 'GET',
+            'url' => 'https://api.example.com/things',
+        ])->assertOk();
+
+        expect($captured)->toBeArray()
+            // An empty string is Guzzle's final "no proxy": the environment is not
+            // consulted, and Guzzle itself writes the empty CURLOPT_PROXY.
+            ->and($captured['proxy'])->toBe('')
+            ->and($captured['curl'] ?? [])->not->toHaveKey(CURLOPT_PROXY)
+            // Guarded together: the pin is the reason the proxy has to be empty.
+            ->and($captured['curl'][CURLOPT_RESOLVE])->toBe(['api.example.com:443:'.API_DOCK_SECURITY_PUBLIC_IP]);
+    } finally {
+        putenv('HTTP_PROXY');
+        putenv('HTTPS_PROXY');
+    }
+});
+
+it('does not send a request through a configured proxy that resolves the host remotely', function (string $configured): void {
+    config()->set('api-dock.try_it.proxy', $configured);
+
+    Http::fake();
+
+    $response = $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://api.example.com/things',
+    ]);
+
+    $response->assertStatus(422);
+
+    expect((string) $response->json('message'))->toContain('socks5 or socks4');
+
+    Http::assertNothingSent();
+})->with([
+    'remotely resolving socks5' => ['socks5h://127.0.0.1:1080'],
+    'remotely resolving socks4' => ['socks4a://127.0.0.1:1080'],
+    // An HTTP proxy is handed the hostname, not the pinned address, and resolves it itself.
+    'http proxy' => ['http://proxy.test:3128'],
+    'https proxy' => ['https://proxy.test:3128'],
+    'no scheme at all' => ['proxy.test:3128'],
+]);
+
+it('passes a configured proxy through to the outbound request', function (): void {
+    config()->set('api-dock.try_it.proxy', 'socks5://proxy.test:1080');
+
+    $captured = null;
+
+    Http::fake(function (ClientRequest $request, array $options) use (&$captured) {
+        $captured = $options;
+
+        return Http::response('{"ok":true}', 200);
+    });
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'GET',
+        'url' => 'https://api.example.com/things',
+    ])->assertOk();
+
+    expect($captured)->toBeArray()
+        ->and($captured['proxy'])->toBe('socks5://proxy.test:1080')
+        // Never in the cURL array: Guzzle 8 rejects CURLOPT_PROXY there outright, which
+        // is the InvalidArgumentException every try-it request failed with.
+        ->and($captured['curl'] ?? [])->not->toHaveKey(CURLOPT_PROXY);
 });

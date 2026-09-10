@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 
 import AiPanel from '@/components/AiPanel.vue'
 import { t } from '@/lib/i18n'
@@ -144,5 +145,42 @@ describe('AiPanel MCP tool', () => {
 
     expect(definition.inputSchema.properties.body).toEqual({ type: 'array', items: { type: 'string' } })
     expect(definition.inputSchema.required).toEqual(['body'])
+  })
+})
+
+describe('AiPanel example dialog', () => {
+  it('moves focus onto the close control, keeps Tab inside and returns focus on close', async () => {
+    const wrapper = mount(AiPanel, {
+      attachTo: window.document.body,
+      props: {
+        document,
+        operation: entry({
+          responses: {},
+          'x-ai-examples': [{ name: 'create', request: { email: 'a@b.c' }, response: { id: 1 } }],
+        }),
+      },
+    })
+
+    const trigger = wrapper.get('[data-testid="expand-example-request"]')
+    await trigger.trigger('click')
+    await nextTick()
+
+    const close = window.document.querySelector<HTMLElement>('[data-testid="close-ai-example-modal"]')
+    expect(window.document.activeElement).toBe(close)
+
+    // The dialog holds one focusable control, so a Tab in either direction stays on it.
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    window.document.dispatchEvent(tab)
+    expect(tab.defaultPrevented).toBe(true)
+    expect(window.document.activeElement).toBe(close)
+
+    window.document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await nextTick()
+    await nextTick()
+
+    expect(window.document.querySelector('[data-testid="ai-example-modal"]')).toBeNull()
+    expect(window.document.activeElement).toBe(trigger.element)
+
+    wrapper.unmount()
   })
 })

@@ -11,6 +11,8 @@ import { resolveInitialLocale, setLocale } from './lib/i18n'
 import { resolveInitialTheme, setTheme } from './lib/theme'
 import { DEFAULT_PROFILE_LIFETIME_MINUTES } from './lib/tryItProfiles'
 import type { ProfileStorageMode } from './lib/tryItProfiles'
+import { bindIdentity as bindResponseIdentity } from './lib/tryItResponses'
+import { bindIdentity as bindSessionIdentity } from './lib/tryItSession'
 
 const mountElement = document.querySelector<HTMLElement>('[data-api-dock-app]')
 
@@ -27,6 +29,13 @@ if (mountElement) {
 
   setLocale(resolveInitialLocale(mountElement.dataset.locale))
   setTheme(resolveInitialTheme(mountElement.dataset.theme))
+
+  // Bound before anything mounts, so no component ever reads state the previous
+  // account left in this browser. A missing attribute reads as the guest stamp,
+  // which purges every envelope written under a real account.
+  const identity = mountElement.dataset.identity ?? ''
+  bindSessionIdentity(identity)
+  bindResponseIdentity(identity)
 
   const version = mountElement.dataset.version || 'dev'
 

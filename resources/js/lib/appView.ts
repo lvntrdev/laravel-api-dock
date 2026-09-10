@@ -1,14 +1,23 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
-// Which surface the main column shows. The settings view is a peer of the operation
-// detail, not a modal: it owns the profile list and the request target, so it stays
-// reachable while the reader keeps a profile selected.
-export const settingsOpen = ref(false)
+// Which surface the main column shows. Settings and the changelog are peers of the
+// operation detail, not modals: both own their own scroll position and stay
+// reachable while the reader keeps an operation selected.
+export type MainView = 'operation' | 'settings' | 'changelog'
+
+export const mainView = ref<MainView>('operation')
+
+export const settingsOpen = computed(() => mainView.value === 'settings')
+export const changelogOpen = computed(() => mainView.value === 'changelog')
 
 export function openSettings(): void {
-  settingsOpen.value = true
+  mainView.value = 'settings'
+}
+
+export function openChangelog(): void {
+  mainView.value = 'changelog'
 }
 
 export function closeSettings(): void {
-  settingsOpen.value = false
+  mainView.value = 'operation'
 }
