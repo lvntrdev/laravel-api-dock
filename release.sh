@@ -4,8 +4,8 @@
 #
 # Composer paketlerinde sürüm composer.json'da TUTULMAZ; paket Packagist'te
 # olmadığı için tüketici uygulama depoyu VCS repository olarak ekler ve sürümü
-# doğrudan git tag'inden çözer. Bu script tag'i üretir, öncesinde kaliteyi ve
-# build çıktısını doğrular.
+# doğrudan git tag'inden çözer. Bu script tag'i üretir, öncesinde kaliteyi,
+# build çıktısını ve sürümün CHANGELOG kaydını doğrular.
 #
 # Ön koşul: yayınlanacak bütün değişiklikler ZATEN commit'lenmiş olmalı.
 # Script commit atmaz; yalnızca doğrular, tag'ler ve (onayla) push eder.
@@ -180,6 +180,23 @@ echo "Yeni sürüm:   $TAG"
 if [ "$NO_VERIFY" -eq 1 ]; then
   printf '%s--no-verify → test/build kapısı atlandı.%s\n' "$C_DIM" "$C_RST"
 else
+  # CHANGELOG ÖNCE, testlerden de önce: en ucuz kapı ve en sık unutulan adım. Tag
+  # atıldıktan sonra kaydı eklemek sürümün içeriğini geriye dönük değiştirmek olur.
+  step "CHANGELOG (v$NEW kaydı)"
+  [ -f CHANGELOG.md ] || die "CHANGELOG.md yok."
+  # Sürüm numarasındaki noktalar kaçırılır; kaçırılmazsa '0.0.7' başlığı '0x0y7'
+  # gibi bir satıra da uyar ve kapı boş yere açılırdı.
+  grep -qE "^## \[${NEW//./\\.}\]" CHANGELOG.md \
+    || die "CHANGELOG.md içinde '## [$NEW]' başlığı yok. Unreleased altındaki kayıtları bu başlığa taşı, commit'le."
+  # Unreleased altında kalan kayıt = tag'e GİREN ama sürüme yazılmayan değişiklik;
+  # sürüm notu eksik çıkar ve o kayıt bir sonraki sürüme yanlışlıkla yazılır.
+  UNRELEASED_LEFT=$(awk '/^## Unreleased/{f=1;next} f&&/^## /{exit} f&&NF{print}' CHANGELOG.md)
+  if [ -n "$UNRELEASED_LEFT" ]; then
+    printf '%s\n' "$UNRELEASED_LEFT" | head -n 5
+    die "Unreleased altında kayıt duruyor. Bunları '## [$NEW]' başlığına taşı, commit'le."
+  fi
+  ok "CHANGELOG'da '## [$NEW]' var, Unreleased boş."
+
   step "Pint (kod stili)"
   vendor/bin/pint --test || die "Pint başarısız. 'vendor/bin/pint' çalıştır, commit'le."
 
