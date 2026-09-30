@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Support;
+namespace Lvntr\ApiDock\Support;
 
 /**
  * Stable change type slugs:

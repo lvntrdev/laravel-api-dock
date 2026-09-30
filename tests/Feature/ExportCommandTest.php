@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use LvntR\ApiDock\Export\LlmsTxtExporter;
-use LvntR\ApiDock\Export\McpToolExporter;
+use Lvntr\ApiDock\Export\LlmsTxtExporter;
+use Lvntr\ApiDock\Export\McpToolExporter;
 
 beforeEach(function (): void {
     config()->set(

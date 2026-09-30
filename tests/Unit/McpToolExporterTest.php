@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use LvntR\ApiDock\Export\McpToolExporter;
-use LvntR\ApiDock\Tests\TestCase;
+use Lvntr\ApiDock\Export\McpToolExporter;
+use Lvntr\ApiDock\Tests\TestCase;
 
 uses(TestCase::class);
 

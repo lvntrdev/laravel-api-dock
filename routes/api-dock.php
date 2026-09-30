@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
-use LvntR\ApiDock\Http\Controllers\AuthProfileController;
-use LvntR\ApiDock\Http\Controllers\ProxyController;
-use LvntR\ApiDock\Http\Controllers\SpecController;
-use LvntR\ApiDock\Http\Middleware\ApiDockAccess;
+use Lvntr\ApiDock\Http\Controllers\AuthProfileController;
+use Lvntr\ApiDock\Http\Controllers\ProxyController;
+use Lvntr\ApiDock\Http\Controllers\SpecController;
+use Lvntr\ApiDock\Http\Middleware\ApiDockAccess;
 
 $middleware = array_values(array_merge(
     (array) config('api-dock.middleware', ['web']),

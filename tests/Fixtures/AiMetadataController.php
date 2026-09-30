@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Tests\Fixtures;
+namespace Lvntr\ApiDock\Tests\Fixtures;
 
-use LvntR\ApiDock\Attributes\AiChangelog;
-use LvntR\ApiDock\Attributes\AiExample;
-use LvntR\ApiDock\Attributes\AiHint;
-use LvntR\ApiDock\Attributes\AiPitfall;
-use LvntR\ApiDock\Attributes\AiTool;
-use LvntR\ApiDock\Attributes\ApiFeature;
+use Lvntr\ApiDock\Attributes\AiChangelog;
+use Lvntr\ApiDock\Attributes\AiExample;
+use Lvntr\ApiDock\Attributes\AiHint;
+use Lvntr\ApiDock\Attributes\AiPitfall;
+use Lvntr\ApiDock\Attributes\AiTool;
+use Lvntr\ApiDock\Attributes\ApiFeature;
 
 #[AiHint('Default resource inspection guidance.')]
 #[AiExample(

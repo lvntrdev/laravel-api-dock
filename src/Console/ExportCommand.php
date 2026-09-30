@@ -2,13 +2,13 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Console;
+namespace Lvntr\ApiDock\Console;
 
 use Illuminate\Console\Command;
 use JsonException;
-use LvntR\ApiDock\Export\LlmsTxtExporter;
-use LvntR\ApiDock\Export\McpToolExporter;
-use LvntR\ApiDock\Support\DocumentGenerator;
+use Lvntr\ApiDock\Export\LlmsTxtExporter;
+use Lvntr\ApiDock\Export\McpToolExporter;
+use Lvntr\ApiDock\Support\DocumentGenerator;
 use Throwable;
 
 final class ExportCommand extends Command

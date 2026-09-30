@@ -6,8 +6,8 @@ use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Session;
-use LvntR\ApiDock\Support\AuthProfileStore;
-use LvntR\ApiDock\Support\OutboundRequestGuard;
+use Lvntr\ApiDock\Support\AuthProfileStore;
+use Lvntr\ApiDock\Support\OutboundRequestGuard;
 
 /**
  * Every test here fakes the HTTP client and injects the resolver, so no assertion

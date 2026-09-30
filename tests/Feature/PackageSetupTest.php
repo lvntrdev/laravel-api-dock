@@ -2,12 +2,13 @@
 
 declare(strict_types=1);
 
+use Composer\Autoload\ClassLoader;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
-use LvntR\ApiDock\ApiDockServiceProvider;
-use LvntR\ApiDock\Http\Middleware\ApiDockAccess;
+use Lvntr\ApiDock\ApiDockServiceProvider;
+use Lvntr\ApiDock\Http\Middleware\ApiDockAccess;
 
 /**
  * Re-run the provider's boot-time gate registration against the config in effect now.
@@ -43,6 +44,37 @@ it('boots the package provider and exposes its configuration', function (): void
     expect($publishPaths)
         ->not->toBeEmpty()
         ->and(array_values($publishPaths))->toContain(config_path('api-dock.php'));
+});
+
+it('resolves classes under both the current and the old namespace spelling', function (): void {
+    // class_exists() alone cannot prove the BC prefix: PHP class names are case-insensitive,
+    // so a class already loaded under one spelling answers for the other. Ask the Composer
+    // loader directly, with a class that has no reason to be loaded yet.
+    $loader = array_values(ClassLoader::getRegisteredLoaders())[0];
+
+    expect($loader->findFile('LvntR\ApiDock\Attributes\AiPitfall'))
+        ->toBeString()
+        ->toBe($loader->findFile('Lvntr\ApiDock\Attributes\AiPitfall'))
+        ->and(class_exists('LvntR\ApiDock\ApiDockServiceProvider'))->toBeTrue()
+        ->and(class_exists('Lvntr\ApiDock\ApiDockServiceProvider'))->toBeTrue();
+});
+
+it('resolves the old namespace spelling under a classmap-authoritative loader', function (): void {
+    // A fresh process, so nothing is loaded yet: the loader sees only the classmap, which
+    // lists the declared `Lvntr` spelling, exactly as `--classmap-authoritative` builds it.
+    $script = sprintf(<<<'PHP'
+        require %s;
+        foreach (Composer\Autoload\ClassLoader::getRegisteredLoaders() as $loader) {
+            $loader->addClassMap(['Lvntr\ApiDock\Attributes\AiPitfall' => %s]);
+            $loader->setClassMapAuthoritative(true);
+        }
+        echo class_exists('LvntR\ApiDock\Attributes\AiPitfall') ? 'resolved' : 'missing';
+        PHP,
+        var_export(dirname(__DIR__, 2).'/vendor/autoload.php', true),
+        var_export(dirname(__DIR__, 2).'/src/Attributes/AiPitfall.php', true),
+    );
+
+    expect(shell_exec(escapeshellarg(PHP_BINARY).' -r '.escapeshellarg($script)))->toBe('resolved');
 });
 
 it('returns the generated OpenAPI document for a fixture route', function (): void {

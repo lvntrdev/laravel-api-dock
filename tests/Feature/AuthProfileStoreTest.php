@@ -12,8 +12,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
-use LvntR\ApiDock\Support\AuthProfileStore;
-use LvntR\ApiDock\Support\OutboundRequestGuard;
+use Lvntr\ApiDock\Support\AuthProfileStore;
+use Lvntr\ApiDock\Support\OutboundRequestGuard;
 
 /**
  * Cover for the credential store: what it puts in the session, what it hands

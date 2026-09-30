@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Support;
+namespace Lvntr\ApiDock\Support;
 
 use Dedoc\Scramble\Generator;
 use Dedoc\Scramble\Scramble;
-use LvntR\ApiDock\ApiDockServiceProvider;
-use LvntR\ApiDock\DocumentTransformers\ApiDockTransformer;
+use Lvntr\ApiDock\ApiDockServiceProvider;
+use Lvntr\ApiDock\DocumentTransformers\ApiDockTransformer;
 
 /**
  * Single entry point for producing the package's OpenAPI document.

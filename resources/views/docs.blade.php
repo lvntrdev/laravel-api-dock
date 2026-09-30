@@ -5,7 +5,7 @@
     // credential copy promises a lifetime, and the only honest promise is the one
     // this request's storage will keep: with persistence on, a credential outlives
     // logout and is shared across the user's sessions.
-    $profileStorage = \LvntR\ApiDock\Support\AuthProfileStore::storageModeForCurrentRequest();
+    $profileStorage = \Lvntr\ApiDock\Support\AuthProfileStore::storageModeForCurrentRequest();
     // Which account the browser's stored try-it state belongs to. An opaque stamp, not
     // the id: the browser only has to tell one account apart from another, and the id
     // itself would be a gratuitous disclosure. Guests get '', so they share as before.
@@ -26,7 +26,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
     <title>{{ config('app.name', 'Laravel') }} · API Dock</title>
-    <link rel="stylesheet" href="{{ \LvntR\ApiDock\ApiDockServiceProvider::assetUrl('api-dock.css') }}">
+    <link rel="stylesheet" href="{{ \Lvntr\ApiDock\ApiDockServiceProvider::assetUrl('api-dock.css') }}">
 </head>
 <body>
     <div
@@ -36,13 +36,13 @@
         data-csrf-token="{{ csrf_token() }}"
         data-locale="{{ $locale }}"
         data-theme="{{ $theme }}"
-        data-version="{{ \LvntR\ApiDock\ApiDockServiceProvider::version() }}"
+        data-version="{{ \Lvntr\ApiDock\ApiDockServiceProvider::version() }}"
         data-profile-storage="{{ $profileStorage }}"
         data-identity="{{ $identity }}"
-        @if ($profileStorage === \LvntR\ApiDock\Support\AuthProfileStore::MODE_PERSISTENT)
-        data-profile-lifetime-minutes="{{ \LvntR\ApiDock\Support\AuthProfileStore::persistenceTtl() }}"
+        @if ($profileStorage === \Lvntr\ApiDock\Support\AuthProfileStore::MODE_PERSISTENT)
+        data-profile-lifetime-minutes="{{ \Lvntr\ApiDock\Support\AuthProfileStore::persistenceTtl() }}"
         @endif
     ></div>
-    <script defer src="{{ \LvntR\ApiDock\ApiDockServiceProvider::assetUrl('api-dock.js') }}"></script>
+    <script defer src="{{ \Lvntr\ApiDock\ApiDockServiceProvider::assetUrl('api-dock.js') }}"></script>
 </body>
 </html>

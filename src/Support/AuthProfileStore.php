@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Support;
+namespace Lvntr\ApiDock\Support;
 
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;

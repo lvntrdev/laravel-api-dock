@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Console;
+namespace Lvntr\ApiDock\Console;
 
 use Illuminate\Console\Command;
 use RuntimeException;
@@ -159,7 +159,7 @@ final class AgentGuideCommand extends Command
 
         - A fact belongs to exactly ONE of three places — the OpenAPI schema
           (parameters, types, status codes, response shapes), the docblock description
-          (prose for a human), or the `LvntR\ApiDock\Attributes\*` attributes (the
+          (prose for a human), or the `Lvntr\ApiDock\Attributes\*` attributes (the
           structured contract). Never restate one in another.
         - Never write an agent prompt, a parameter table, a status-code list or a
           changelog into the description. The AI panel generates the prompt from the

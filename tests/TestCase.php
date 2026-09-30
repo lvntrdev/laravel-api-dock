@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Tests;
+namespace Lvntr\ApiDock\Tests;
 
 use Dedoc\Scramble\ScrambleServiceProvider;
 use Illuminate\Foundation\Application;
 use Illuminate\Routing\Router;
 use Illuminate\Session\Middleware\StartSession;
-use LvntR\ApiDock\ApiDockServiceProvider;
-use LvntR\ApiDock\Tests\Fixtures\AiMetadataController;
+use Lvntr\ApiDock\ApiDockServiceProvider;
+use Lvntr\ApiDock\Tests\Fixtures\AiMetadataController;
 use Orchestra\Testbench\TestCase as Orchestra;
 
 abstract class TestCase extends Orchestra

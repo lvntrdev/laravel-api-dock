@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\DocumentTransformers;
+namespace Lvntr\ApiDock\DocumentTransformers;
 
 use DateTimeImmutable;
-use LvntR\ApiDock\ApiDockServiceProvider;
+use Lvntr\ApiDock\ApiDockServiceProvider;
 use Throwable;
 
 /**
@@ -17,7 +17,7 @@ use Throwable;
  * extension set on the `OpenApi` object is silently dropped — unlike
  * `Operation::toArray()`, which does merge them. Document-level metadata is
  * therefore applied to the generated array instead, through
- * `LvntR\ApiDock\Support\DocumentGenerator`.
+ * `Lvntr\ApiDock\Support\DocumentGenerator`.
  */
 final class ApiDockTransformer
 {

@@ -8,6 +8,10 @@ All notable changes to this project are documented in this file.
 
 - **Try-it drafts no longer outlive the tab.** What a reader types into the parameter and body fields is now kept in `sessionStorage` under `api-dock:try-it-draft`, next to the response history, so it is dropped when the tab closes instead of sitting in `localStorage` where the next person on the same browser profile would find it. `localStorage` keeps only the UI preferences — the selected profile id, the selected server, its variables and the plain base URL — and drafts an earlier version left there are removed on the next page load.
 
+### Changed
+
+- **The root namespace is now `Lvntr\ApiDock`** (was `LvntR\ApiDock`), matching the vendor casing of `lvntr/laravel-starter-kit`. Two spellings of one vendor made Laravel Wayfinder generate both `resources/js/actions/LvntR/` and `resources/js/actions/Lvntr/` in a consuming app, which fold into one folder on a case-insensitive filesystem and fail `vue-tsc` with TS1149 on Linux. The old `LvntR\ApiDock` spelling keeps working through a second PSR-4 prefix in `composer.json` plus a small autoloader that also covers `composer install --classmap-authoritative`, so existing imports still autoload; consumers should update their imports to `Lvntr\ApiDock`, since the shim will be removed in a later minor. After upgrading, regenerate Wayfinder output and delete a leftover `LvntR` folder.
+
 ## [0.0.7] - 2026-09-10
 
 ### Security

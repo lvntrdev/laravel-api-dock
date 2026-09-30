@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Export;
+namespace Lvntr\ApiDock\Export;
 
 use JsonException;
 

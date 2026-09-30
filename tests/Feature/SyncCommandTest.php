@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Artisan;
-use LvntR\ApiDock\Support\DocumentGenerator;
-use LvntR\ApiDock\Support\OpenApiSnapshot;
-use LvntR\ApiDock\Support\SpecDiffer;
+use Lvntr\ApiDock\Support\DocumentGenerator;
+use Lvntr\ApiDock\Support\OpenApiSnapshot;
+use Lvntr\ApiDock\Support\SpecDiffer;
 
 beforeEach(function (): void {
     config()->set(

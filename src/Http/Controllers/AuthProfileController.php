@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Http\Controllers;
+namespace Lvntr\ApiDock\Http\Controllers;
 
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -10,8 +10,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
 use InvalidArgumentException;
-use LvntR\ApiDock\Support\AuthProfileStore;
-use LvntR\ApiDock\Support\OutboundRequestGuard;
+use Lvntr\ApiDock\Support\AuthProfileStore;
+use Lvntr\ApiDock\Support\OutboundRequestGuard;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 

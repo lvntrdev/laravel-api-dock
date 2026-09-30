@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use LvntR\ApiDock\Support\SpecDiffer;
+use Lvntr\ApiDock\Support\SpecDiffer;
 
 it('classifies a removed operation as breaking', function (): void {
     $result = (new SpecDiffer)->diff(

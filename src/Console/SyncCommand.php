@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Console;
+namespace Lvntr\ApiDock\Console;
 
 use Illuminate\Console\Command;
-use LvntR\ApiDock\Support\DocumentGenerator;
-use LvntR\ApiDock\Support\OpenApiSnapshot;
-use LvntR\ApiDock\Support\SpecChange;
-use LvntR\ApiDock\Support\SpecDiffer;
-use LvntR\ApiDock\Support\SpecDiffResult;
+use Lvntr\ApiDock\Support\DocumentGenerator;
+use Lvntr\ApiDock\Support\OpenApiSnapshot;
+use Lvntr\ApiDock\Support\SpecChange;
+use Lvntr\ApiDock\Support\SpecDiffer;
+use Lvntr\ApiDock\Support\SpecDiffResult;
 
 final class SyncCommand extends Command
 {

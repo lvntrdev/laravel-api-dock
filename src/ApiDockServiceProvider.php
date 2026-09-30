@@ -2,19 +2,19 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock;
+namespace Lvntr\ApiDock;
 
 use Composer\InstalledVersions;
 use Dedoc\Scramble\Scramble;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Gate;
-use LvntR\ApiDock\Console\AgentGuideCommand;
-use LvntR\ApiDock\Console\DiffCommand;
-use LvntR\ApiDock\Console\ExportCommand;
-use LvntR\ApiDock\Console\SyncCommand;
-use LvntR\ApiDock\Extensions\AiMetadataOperationExtension;
-use LvntR\ApiDock\Extensions\FeatureOperationExtension;
-use LvntR\ApiDock\Http\Middleware\ApiDockAccess;
+use Lvntr\ApiDock\Console\AgentGuideCommand;
+use Lvntr\ApiDock\Console\DiffCommand;
+use Lvntr\ApiDock\Console\ExportCommand;
+use Lvntr\ApiDock\Console\SyncCommand;
+use Lvntr\ApiDock\Extensions\AiMetadataOperationExtension;
+use Lvntr\ApiDock\Extensions\FeatureOperationExtension;
+use Lvntr\ApiDock\Http\Middleware\ApiDockAccess;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;
 

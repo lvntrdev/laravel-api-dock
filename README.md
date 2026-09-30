@@ -55,7 +55,7 @@ composer require lvntr/api-dock:~0.0.1
 
 Composer reads the tags of that repository, so a constraint resolves to a released tag exactly as it would through Packagist. The Composer package name stays `lvntr/api-dock` even though the repository is named `laravel-api-dock`. A caret constraint on a `0.0.x` version is exact in Composer — `^0.0.1` allows only `0.0.1` — so this uses `~0.0.1` instead, which accepts every later `0.0.x` release, matching what a plain `composer update` needs while the package is pre-0.1.
 
-Laravel discovers `LvntR\ApiDock\ApiDockServiceProvider` through the package manifest. Publish only what the application needs:
+Laravel discovers `Lvntr\ApiDock\ApiDockServiceProvider` through the package manifest. Publish only what the application needs:
 
 ```bash
 php artisan vendor:publish --tag=api-dock-config
@@ -213,12 +213,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
-use LvntR\ApiDock\Attributes\AiChangelog;
-use LvntR\ApiDock\Attributes\AiExample;
-use LvntR\ApiDock\Attributes\AiHint;
-use LvntR\ApiDock\Attributes\AiPitfall;
-use LvntR\ApiDock\Attributes\AiTool;
-use LvntR\ApiDock\Attributes\ApiFeature;
+use Lvntr\ApiDock\Attributes\AiChangelog;
+use Lvntr\ApiDock\Attributes\AiExample;
+use Lvntr\ApiDock\Attributes\AiHint;
+use Lvntr\ApiDock\Attributes\AiPitfall;
+use Lvntr\ApiDock\Attributes\AiTool;
+use Lvntr\ApiDock\Attributes\ApiFeature;
 
 #[AiPitfall('Resource IDs are case-sensitive.', order: 10)]
 #[AiTool(name: 'inspect_resource', description: 'Inspect one API resource.')]

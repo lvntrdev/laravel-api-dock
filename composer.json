@@ -39,12 +39,17 @@
     },
     "autoload": {
         "psr-4": {
+            "Lvntr\\ApiDock\\": "src/",
             "LvntR\\ApiDock\\": "src/"
-        }
+        },
+        "files": [
+            "src/legacy-namespace.php"
+        ]
     },
+    "_comment": "autoload.psr-4 'LvntR\\ApiDock\\' and autoload.files src/legacy-namespace.php are a BC shim for the old namespace spelling; remove both in a later minor.",
     "autoload-dev": {
         "psr-4": {
-            "LvntR\\ApiDock\\Tests\\": "tests/"
+            "Lvntr\\ApiDock\\Tests\\": "tests/"
         }
     },
     "scripts": {
@@ -55,7 +60,7 @@
     "extra": {
         "laravel": {
             "providers": [
-                "LvntR\\ApiDock\\ApiDockServiceProvider"
+                "Lvntr\\ApiDock\\ApiDockServiceProvider"
             ]
         }
     },

@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Extensions;
+namespace Lvntr\ApiDock\Extensions;
 
 use Dedoc\Scramble\Extensions\OperationExtension;
 use Dedoc\Scramble\Support\Generator\Operation;
 use Dedoc\Scramble\Support\RouteInfo;
 use Illuminate\Routing\Route;
 use Illuminate\Routing\Router;
-use LvntR\ApiDock\Attributes\ApiFeature;
+use Lvntr\ApiDock\Attributes\ApiFeature;
 use ReflectionAttribute;
 use ReflectionClass;
 use ReflectionMethod;

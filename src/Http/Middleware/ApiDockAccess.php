@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Http\Middleware;
+namespace Lvntr\ApiDock\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;

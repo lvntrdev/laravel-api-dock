@@ -5,7 +5,7 @@ declare(strict_types=1);
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request as ClientRequest;
 use Illuminate\Support\Facades\Http;
-use LvntR\ApiDock\Support\OutboundRequestGuard;
+use Lvntr\ApiDock\Support\OutboundRequestGuard;
 
 /**
  * Regression cover for the outbound boundary, written against the *observable*

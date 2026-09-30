@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Http\Controllers;
+namespace Lvntr\ApiDock\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Session;
 use JsonException;
-use LvntR\ApiDock\Support\AuthProfileStore;
-use LvntR\ApiDock\Support\OutboundRequestGuard;
+use Lvntr\ApiDock\Support\AuthProfileStore;
+use Lvntr\ApiDock\Support\OutboundRequestGuard;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;

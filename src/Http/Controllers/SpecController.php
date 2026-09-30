@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace LvntR\ApiDock\Http\Controllers;
+namespace Lvntr\ApiDock\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
-use LvntR\ApiDock\Support\DocumentGenerator;
+use Lvntr\ApiDock\Support\DocumentGenerator;
 
 final class SpecController
 {

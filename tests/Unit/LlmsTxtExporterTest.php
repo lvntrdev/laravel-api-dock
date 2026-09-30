@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use LvntR\ApiDock\Export\LlmsTxtExporter;
-use LvntR\ApiDock\Tests\TestCase;
+use Lvntr\ApiDock\Export\LlmsTxtExporter;
+use Lvntr\ApiDock\Tests\TestCase;
 
 uses(TestCase::class);
 
