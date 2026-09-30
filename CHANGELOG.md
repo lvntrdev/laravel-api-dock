@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## [0.0.8] - 2026-10-01
+
+### Security
+
+- **Try-it drafts no longer outlive the tab.** What a reader types into the parameter and body fields is now kept in `sessionStorage` under `api-dock:try-it-draft`, next to the response history, so it is dropped when the tab closes instead of sitting in `localStorage` where the next person on the same browser profile would find it. `localStorage` keeps only the UI preferences — the selected profile id, the selected server, its variables and the plain base URL — and drafts an earlier version left there are removed on the next page load.
 
 ## [0.0.7] - 2026-09-10
 

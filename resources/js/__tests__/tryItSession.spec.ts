@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const STORAGE_KEY = 'api-dock:try-it'
 
+const DRAFT_KEY = 'api-dock:try-it-draft'
+
 afterEach(() => {
   vi.resetModules()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  sessionStorage.clear()
 })
 
 describe('try-it session persistence', () => {
@@ -149,13 +152,63 @@ describe('try-it session persistence', () => {
       selectedServer: 'https://{tenant}.example.com/api',
       serverVariables: { tenant: 'acme' },
       plainBaseUrl: 'https://staging.example.com/api',
-      operations: {},
     })
     expect(serialized).not.toContain(rawCredential)
     expect(serialized).not.toContain(credentialHeaderValue)
     expect(serialized).not.toContain(credentialHint)
     expect(serialized).not.toContain('credential')
     expect(serialized).not.toContain('credential_hint')
+  })
+
+  it('keeps the values the reader typed out of localStorage', async () => {
+    // localStorage outlives the tab and is shared with whoever opens this browser
+    // profile next; a draft is the request itself, so it belongs in neither.
+    const storage = storageStub()
+    vi.stubGlobal('localStorage', storage)
+    const session = await import('@/lib/tryItSession')
+
+    session.setOperationInputs('get:/participants', {
+      parameters: { 'query:participant_id': 'p-4711' },
+      body: '{"city":"ankara"}',
+    })
+
+    expect(storage.setItem).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(DRAFT_KEY) ?? '').toContain('p-4711')
+  })
+
+  it('purges drafts another account left in this tab', async () => {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+      identity: 'account-a',
+      operations: { 'get:/orders': { parameters: { 'query:id': '7' }, body: '' } },
+    }))
+    vi.stubGlobal('localStorage', storageStub())
+    const session = await import('@/lib/tryItSession')
+    expect(session.operationInputs.value['get:/orders']).toBeDefined()
+
+    session.bindIdentity('account-b')
+
+    expect(session.operationInputs.value).toEqual({})
+    expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull()
+  })
+
+  it('removes drafts an older version left in localStorage', async () => {
+    // The envelope is rewritten on bind rather than on the next preference change:
+    // a reader who changes nothing would otherwise keep the old drafts on disk.
+    const storage = storageStub(JSON.stringify({
+      identity: 'account-a',
+      selectedProfileId: 'profile-1',
+      operations: { 'get:/orders': { parameters: { 'query:participant_id': 'p-4711' }, body: '' } },
+    }))
+    vi.stubGlobal('localStorage', storage)
+    const session = await import('@/lib/tryItSession')
+
+    session.bindIdentity('account-a')
+
+    const serialized = lastStoredValue(storage)
+    expect(session.selectedProfileId.value).toBe('profile-1')
+    expect(session.operationInputs.value).toEqual({})
+    expect(serialized).not.toContain('p-4711')
+    expect(JSON.parse(serialized).operations).toBeUndefined()
   })
 })
 

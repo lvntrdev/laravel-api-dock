@@ -5,6 +5,15 @@ import type { ParameterObject, SchemaObject } from '@/types/openapi'
 
 const STORAGE_KEY = 'api-dock:try-it'
 
+/**
+ * The typed-in drafts live in their own TAB-scoped key, alongside the responses in
+ * `tryItResponses`. A draft IS the request the reader composed — a participant id, a
+ * device token, a real payload — and there is no reason for it to outlive the tab on
+ * disk, where the next person on the same browser profile would find it. Only the UI
+ * preferences above stay in `localStorage`.
+ */
+const DRAFT_KEY = 'api-dock:try-it-draft'
+
 /** What the reader typed into one operation's try-it form, keyed `<in>:<name>`. */
 export interface TryItOperationInputs {
   parameters: Record<string, string>
@@ -17,6 +26,11 @@ interface TryItSessionState {
   selectedServer: string
   serverVariables: Record<string, string>
   plainBaseUrl: string
+}
+
+/** The tab-scoped half: the form values the reader typed, per operation. */
+interface TryItDraftState {
+  identity: string
   operations: Record<string, TryItOperationInputs>
 }
 
@@ -26,7 +40,6 @@ const DEFAULT_STATE: TryItSessionState = {
   selectedServer: '',
   serverVariables: {},
   plainBaseUrl: '',
-  operations: {},
 }
 
 /**
@@ -46,6 +59,8 @@ const MAX_PARAMETER_LENGTH = 2_000
 // header values, and credential_hint must never enter this module.
 const initialState = storedState()
 
+const initialDrafts = storedDrafts()
+
 export const selectedProfileId = ref(initialState.selectedProfileId)
 // The server template the reader picked, stored as its own url so a spec that reorders
 // its servers cannot silently move the request to a different host.
@@ -56,7 +71,7 @@ export const plainBaseUrl = ref(initialState.plainBaseUrl)
 // start from an empty form again. Same boundary as everything else here: this map is
 // the request the reader composed, never a credential — the credential lives in the
 // server-side profile and only its masked hint is ever visible to this module.
-export const operationInputs = ref<Record<string, TryItOperationInputs>>(initialState.operations)
+export const operationInputs = ref<Record<string, TryItOperationInputs>>(initialDrafts.operations)
 
 /**
  * Which account this browser's stored state belongs to. An opaque stamp the server
@@ -75,19 +90,30 @@ let boundIdentity = ''
 export function bindIdentity(identity: string): void {
   boundIdentity = identity
 
-  if (storedIdentity() !== identity) {
-    resetTryItSession()
+  // Gated per store rather than once for both: the drafts are gone after a tab close
+  // by design, and their missing envelope must not take the surviving preferences
+  // with it.
+  if (storedIdentity(localStore(), STORAGE_KEY) !== identity) {
+    resetPreferences()
+  } else if (readEnvelope(localStore(), STORAGE_KEY)?.operations !== undefined) {
+    // Drafts an older version left on disk. Rewriting the envelope now is what
+    // actually removes them: nothing else here writes until a preference changes.
+    persistPreferences()
+  }
+
+  if (storedIdentity(sessionStore(), DRAFT_KEY) !== identity) {
+    resetDrafts()
   }
 }
 
 export function setSelectedProfileId(profileId: string): void {
   selectedProfileId.value = profileId
-  persistState()
+  persistPreferences()
 }
 
 export function setSelectedServer(serverUrl: string): void {
   selectedServer.value = serverUrl
-  persistState()
+  persistPreferences()
 }
 
 export function setServerVariables(values: Record<string, string>): void {
@@ -95,7 +121,7 @@ export function setServerVariables(values: Record<string, string>): void {
     ...serverVariables.value,
     ...values,
   }
-  persistState()
+  persistPreferences()
 }
 
 export function ensureServerVariables(defaults: Record<string, string>): void {
@@ -114,7 +140,7 @@ export function setServerVariable(name: string, value: string): void {
 
 export function setPlainBaseUrl(baseUrl: string): void {
   plainBaseUrl.value = baseUrl
-  persistState()
+  persistPreferences()
 }
 
 export function storedOperationInputs(operationKey: string): TryItOperationInputs {
@@ -230,7 +256,7 @@ export function setOperationInputs(operationKey: string, inputs: TryItOperationI
   }
 
   operationInputs.value = next
-  persistState()
+  persistDrafts()
 }
 
 export function discardMissingProfile(profileIds: readonly string[]): void {
@@ -240,95 +266,134 @@ export function discardMissingProfile(profileIds: readonly string[]): void {
 }
 
 export function resetTryItSession(): void {
+  resetPreferences()
+  resetDrafts()
+}
+
+function resetPreferences(): void {
   selectedProfileId.value = DEFAULT_STATE.selectedProfileId
   selectedServer.value = DEFAULT_STATE.selectedServer
   serverVariables.value = {}
   plainBaseUrl.value = DEFAULT_STATE.plainBaseUrl
-  operationInputs.value = {}
+  remove(localStore(), STORAGE_KEY)
+}
 
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEY)
-    }
-  } catch {
-    // Storage can be unavailable without making the try-it session unavailable.
-  }
+function resetDrafts(): void {
+  operationInputs.value = {}
+  remove(sessionStore(), DRAFT_KEY)
 }
 
 /**
- * The identity on the stored envelope, or `null` when there is no envelope or it
+ * The identity on a stored envelope, or `null` when there is no envelope or it
  * carries none. `null` is deliberately distinct from `''`: a guest must not inherit
  * an unstamped envelope a logged-in reader may have left behind.
  */
-function storedIdentity(): string | null {
-  try {
-    if (typeof localStorage === 'undefined') {
-      return null
-    }
+function storedIdentity(storage: Storage | undefined, key: string): string | null {
+  const envelope = readEnvelope(storage, key)
 
-    const serialized = localStorage.getItem(STORAGE_KEY)
-
-    if (serialized === null) {
-      return null
-    }
-
-    const candidate: unknown = JSON.parse(serialized)
-
-    return isRecord(candidate) && typeof candidate.identity === 'string'
-      ? candidate.identity
-      : null
-  } catch {
-    return null
-  }
+  return envelope !== undefined && typeof envelope.identity === 'string'
+    ? envelope.identity
+    : null
 }
 
 function storedState(): TryItSessionState {
-  try {
-    if (typeof localStorage === 'undefined') {
-      return { ...DEFAULT_STATE, serverVariables: {}, operations: {} }
-    }
+  const candidate = readEnvelope(localStore(), STORAGE_KEY)
 
-    const serialized = localStorage.getItem(STORAGE_KEY)
+  if (candidate === undefined) {
+    return { ...DEFAULT_STATE, serverVariables: {} }
+  }
+
+  return {
+    identity: typeof candidate.identity === 'string' ? candidate.identity : '',
+    selectedProfileId: typeof candidate.selectedProfileId === 'string'
+      ? candidate.selectedProfileId
+      : '',
+    selectedServer: typeof candidate.selectedServer === 'string' ? candidate.selectedServer : '',
+    serverVariables: stringRecord(candidate.serverVariables),
+    plainBaseUrl: typeof candidate.plainBaseUrl === 'string' ? candidate.plainBaseUrl : '',
+  }
+}
+
+function storedDrafts(): TryItDraftState {
+  const candidate = readEnvelope(sessionStore(), DRAFT_KEY)
+
+  if (candidate === undefined) {
+    return { identity: '', operations: {} }
+  }
+
+  return {
+    identity: typeof candidate.identity === 'string' ? candidate.identity : '',
+    operations: operationRecord(candidate.operations),
+  }
+}
+
+function persistPreferences(): void {
+  write(localStore(), STORAGE_KEY, {
+    identity: boundIdentity,
+    selectedProfileId: selectedProfileId.value,
+    selectedServer: selectedServer.value,
+    serverVariables: serverVariables.value,
+    plainBaseUrl: plainBaseUrl.value,
+  } satisfies TryItSessionState)
+}
+
+function persistDrafts(): void {
+  write(sessionStore(), DRAFT_KEY, {
+    identity: boundIdentity,
+    operations: operationInputs.value,
+  } satisfies TryItDraftState)
+}
+
+/** Storage can be unavailable — or throw on access — without making the try-it
+ * session unavailable, so every store is reached through these four wrappers. */
+function localStore(): Storage | undefined {
+  try {
+    return typeof localStorage === 'undefined' ? undefined : localStorage
+  } catch {
+    return undefined
+  }
+}
+
+function sessionStore(): Storage | undefined {
+  try {
+    return typeof sessionStorage === 'undefined' ? undefined : sessionStorage
+  } catch {
+    return undefined
+  }
+}
+
+function readEnvelope(
+  storage: Storage | undefined,
+  key: string,
+): Record<string, unknown> | undefined {
+  try {
+    const serialized = storage?.getItem(key) ?? null
 
     if (serialized === null) {
-      return { ...DEFAULT_STATE, serverVariables: {}, operations: {} }
+      return undefined
     }
 
     const candidate: unknown = JSON.parse(serialized)
 
-    if (!isRecord(candidate)) {
-      return { ...DEFAULT_STATE, serverVariables: {}, operations: {} }
-    }
-
-    return {
-      identity: typeof candidate.identity === 'string' ? candidate.identity : '',
-      selectedProfileId: typeof candidate.selectedProfileId === 'string'
-        ? candidate.selectedProfileId
-        : '',
-      selectedServer: typeof candidate.selectedServer === 'string' ? candidate.selectedServer : '',
-      serverVariables: stringRecord(candidate.serverVariables),
-      plainBaseUrl: typeof candidate.plainBaseUrl === 'string' ? candidate.plainBaseUrl : '',
-      operations: operationRecord(candidate.operations),
-    }
+    return isRecord(candidate) ? candidate : undefined
   } catch {
-    return { ...DEFAULT_STATE, serverVariables: {}, operations: {} }
+    return undefined
   }
 }
 
-function persistState(): void {
+function write(storage: Storage | undefined, key: string, value: unknown): void {
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        identity: boundIdentity,
-        selectedProfileId: selectedProfileId.value,
-        selectedServer: selectedServer.value,
-        serverVariables: serverVariables.value,
-        plainBaseUrl: plainBaseUrl.value,
-        operations: operationInputs.value,
-      } satisfies TryItSessionState))
-    }
+    storage?.setItem(key, JSON.stringify(value))
   } catch {
-    // Storage can be unavailable without making the try-it session unavailable.
+    // A full or blocked quota must not break the panel that is using it.
+  }
+}
+
+function remove(storage: Storage | undefined, key: string): void {
+  try {
+    storage?.removeItem(key)
+  } catch {
+    // Same: an unavailable store is already in the state a purge wants.
   }
 }
 

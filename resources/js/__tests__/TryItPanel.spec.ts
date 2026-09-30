@@ -443,11 +443,14 @@ describe('TryItPanel', () => {
     expect(wrapper.get<HTMLInputElement>('[data-testid="parameter-header-X-Api-Key"]').element.value)
       .toBe('header-secret')
 
-    const persisted = window.localStorage.getItem('api-dock:try-it') ?? ''
+    const persisted = window.sessionStorage.getItem('api-dock:try-it-draft') ?? ''
 
     expect(Object.keys(operationInputs.value[secureOperation.key]?.parameters ?? {}))
       .toEqual(['query:sort'])
     expect(persisted).toContain('created_at')
+    // The drafts are tab-scoped: nothing the reader typed reaches localStorage, which
+    // outlives the tab and is shared with whoever uses this browser profile next.
+    expect(window.localStorage.getItem('api-dock:try-it') ?? '').not.toContain('created_at')
     expect(persisted).not.toContain('header-secret')
     expect(persisted).not.toContain('schema-secret')
     expect(persisted).not.toContain('scheme-secret')
@@ -463,6 +466,7 @@ describe('TryItPanel', () => {
 
     // Half a body would restore as a request that cannot be sent, so none of it is kept.
     expect(operationInputs.value[operation.key]?.body).toBe('')
+    expect(window.sessionStorage.getItem('api-dock:try-it-draft') ?? '').not.toContain('hunter2')
     expect(window.localStorage.getItem('api-dock:try-it') ?? '').not.toContain('hunter2')
 
     await wrapper.get('[data-testid="body-editor"]').setValue('{"q":"laptop"}')
