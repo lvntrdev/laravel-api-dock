@@ -65,7 +65,7 @@ php artisan vendor:publish --tag=api-dock-views
 
 The `api-dock-config` tag writes `config/api-dock.php`. The `api-dock-assets` tag copies the built SPA files to `public/vendor/api-dock`. The `api-dock-views` tag writes the overridable view to `resources/views/vendor/api-dock`.
 
-The service provider registers the Scramble API under the name `api-dock`. Its route filter includes application routes whose URI starts with `api/`. API Dock then uses that named generator for the spec route, snapshots, diffs, and exports.
+API Dock does not register a Scramble API of its own. It documents the API named by `scramble_api` — `default` unless you change it, which is the one a bare `Scramble::configure()` in your application sets up — and appends its operation transformers to it. Your route filter, servers and transformers therefore apply unchanged, and the spec route, snapshots, diffs and exports all use that same generator. If your documented surface lives in a named API (`Scramble::registerApi('v2', ...)`), set `scramble_api` to that name.
 
 With the default `route_prefix`, the package registers these routes:
 
@@ -78,7 +78,7 @@ With the default `route_prefix`, the package registers these routes:
 | `POST` | `/api-dock/try-it/profiles` | `api-dock.try-it.profiles.store` | Store a session credential |
 | `DELETE` | `/api-dock/try-it/profiles/{profile}` | `api-dock.try-it.profiles.destroy` | Remove a session profile |
 
-All paths change with `route_prefix`. Every route receives the configured `middleware` followed by API Dock's own enabled check. The try-it and profile routes also receive the configured throttle.
+All paths change with `route_prefix`. Every route receives the configured `middleware` followed by API Dock's own access check: `enabled`, and the `viewApiDock` ability when `gate.enabled` is on. The try-it and profile routes also receive the configured throttle.
 
 ## Updating
 
@@ -115,10 +115,10 @@ before rolling it out.
 
 ## Before you deploy
 
-- **No authentication ships on the documentation routes.** The only gate is `api-dock.enabled`, and the default
-  middleware stack is `['web']`. The generated document exposes your internal API surface, so put the routes
-  behind your own auth middleware — the `middleware` config key in
-  [Configuration reference](#configuration-reference) — before deploying anywhere public.
+- **No authentication ships on the documentation routes by default.** The default middleware stack is `['web']`
+  and `gate.enabled` is `false`. The generated document exposes your internal API surface, so before deploying
+  anywhere public put the routes behind your own auth middleware (the `middleware` key), turn on `gate.enabled`
+  and define the `viewApiDock` ability, or both — see [Configuration reference](#configuration-reference).
 - **The try-it proxy is on by default, but only towards this application's own host.** `try_it.allowed_hosts`
   ships empty, which denies every foreign host; widen it deliberately, keep `try_it.allowed_methods` as narrow
   as the job needs, and read [Try-it security contract](#try-it-security-contract) first. The proxy inherits the
@@ -142,7 +142,11 @@ These are all keys shipped by `config/api-dock.php`.
 | --- | --- | --- |
 | `enabled` | `true` | Enables the API Dock HTTP surface. When false, API Dock routes return 404. |
 | `route_prefix` | `'api-dock'` | Prefix applied to every package route. |
+| `scramble_api` | `'default'` | Scramble API this package documents. `default` is the one a bare `Scramble::configure()` sets up; name a registered API to document that one instead. |
 | `middleware` | `['web']` | Host middleware applied before API Dock's access check. Use this to restrict the documentation and proxy surface. |
+| `gate.enabled` | `false` | When true, every API Dock route — panel, spec, try-it proxy and profile endpoints — also requires the `viewApiDock` Gate ability. A denied request gets 404, not 403. Fails closed: without your own `Gate::define('viewApiDock', ...)` a deny-all default applies and nobody gets in. A guest is denied unless the ability accepts a nullable user; a `Gate::before` returning true still wins. |
+| `ui.locale` | `null` | Locale of the documentation UI. Null uses the application locale. |
+| `ui.theme` | `'light'` | Theme applied before the reader's stored preference. |
 | `ai.export_path` | `storage_path('api-dock')` | Default directory for generated AI and OpenAPI export files. |
 | `ai.include_examples` | `true` | Includes `x-ai-examples` sections in `llms.txt`. It does not remove examples from the OpenAPI document. |
 | `ai.mcp_opt_in` | `false` | When false, all operations except those with `AiTool(enabled: false)` become MCP tools. When true, only operations with `AiTool(enabled: true)` are exported. |
@@ -153,6 +157,8 @@ These are all keys shipped by `config/api-dock.php`.
 | `try_it.proxy` | `null` | Egress proxy for the outbound try-it request. Null uses none — including one inherited from `HTTP_PROXY`/`HTTPS_PROXY`. Only `socks5://` and `socks4://` are accepted; an HTTP proxy resolves the hostname itself and is refused. |
 | `try_it.timeout` | `10` | Maximum outbound request duration in seconds. Non-positive or non-numeric values fall back to 10. |
 | `try_it.connect_timeout` | `5` | Maximum connection-establishment duration in seconds. Non-positive or non-numeric values fall back to 5. |
+| `try_it.allowed_ports` | `[80, 443]` | Ports the proxy may reach on a foreign host. Empty or malformed falls back to `[80, 443]`. The port of `APP_URL`, and of a `name:port` `self_hosts` entry, is added automatically for that host only. |
+| `try_it.max_request_bytes` | `262144` | Maximum request body the panel may send out, 256 KiB by default. A larger body is rejected with 422 before any outbound request. Non-positive or non-numeric values fall back to 262144. |
 | `try_it.max_response_bytes` | `262144` | Maximum proxied response body, 256 KiB by default. Excess content is truncated and reported with `truncated: true`. |
 | `try_it.throttle` | `'30,1'` | Laravel throttle parameters (`requests,minutes`) applied to the proxy and profile routes. |
 | `try_it.allowed_methods` | `['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']` | Methods accepted from the panel. Configuration can narrow this fixed supported set, not expand it. |
@@ -349,9 +355,10 @@ instruction files coding agents already read on their own — `AGENTS.md`, and
 `CLAUDE.md` or `GEMINI.md` when the project keeps them — pointing at
 [`docs/ai-metadata-authoring.md`](docs/ai-metadata-authoring.md) inside `vendor/`.
 From then on "document this endpoint" carries the rules with it and nobody has to
-restate them per session. Re-running replaces the block in place rather than adding
-a second copy, so it is safe after every upgrade. Nothing outside the markers is
-touched, and no file the project has not adopted is created.
+restate them per session. Without `--file`, every one of those files that already exists is updated; when
+none exists, `AGENTS.md` is created. Re-running replaces the block in place rather
+than adding a second copy, so it is safe after every upgrade. Nothing outside the
+markers is touched.
 
 ### Store or check a snapshot
 
@@ -430,7 +437,7 @@ Only HTTP and HTTPS URLs are accepted. URLs carrying authority credentials, malf
 
 By default, credentials are scoped to the current Laravel session, and they are stored in it: the profile list lives in the session payload under `api-dock.try-it.profiles`, encrypted with the application's encrypter. There is no separate expiry to configure and none to get wrong — a profile lasts exactly as long as the session that created it, and logging out, which invalidates the session, takes every stored credential with it.
 
-Turning on `try_it.profile_persistence.enabled` replaces that with a second mode: the profile list moves to the cache, keyed by the authenticated user id (namespaced by the resolved auth guard, so two different guards or providers can never collide on the same numeric id — see `key_namespace` above for a tenant-per-database app that needs a further namespace) and still encrypted the same way. A cache write that fails outright (a `null` store, a driver error) raises instead of reporting success, since a saved-but-not-really-saved credential is a worse outcome than a visible error. In this mode a profile does **not** die with the session — logging out does not delete it, only an explicit `forget()`/delete or the configured `ttl_minutes` does — and it is shared live across every concurrent session of that user, not just a later re-login. This is a deliberate, opt-in trade-off; see [Configuration reference](#configuration-reference) for the two config keys and their defaults (`false` / 30 days) before turning it on. A profile also carries `server_variables`, the values substituted into a server template; that map is ordinary non-secret data and is returned in the clear like `base_url`, so a credential must never be put in it. Profile list and lookup responses omit the ciphertext and plaintext; they return only profile metadata and `credential_hint`, which is `****` for credentials of eight characters or fewer and `****` plus the last four characters otherwise. The outbound request path is the only code path that decrypts a credential. Reads never return a usable credential to the browser, so the panel does not regain one after profile creation. The browser keeps the selected profile id, the server variable values, the plain base URL, and the form values the reader typed per operation — path, query and header parameters plus the request body — under the `api-dock:try-it` key in `localStorage`, so a page reload does not reset the panel. Those form values are whatever the reader put in the try-it form, so a request body that carries a password or a token is remembered there in the clear; clear site data, or avoid typing a live secret into a body, on a browser you share. That store never holds a credential, a credential header value, or a `credential_hint`, but it does outlive the session and is shared by every specification on the origin — on a shared browser, clear site data when you are done. One consequence is worth stating plainly: with the `cookie` session driver the whole session payload lives in the reader's browser, so the encrypted profile travels with it. Use a server-side session driver — `database`, `redis`, `file` — if you enable the try-it proxy.
+Turning on `try_it.profile_persistence.enabled` replaces that with a second mode: the profile list moves to the cache, keyed by the authenticated user id (namespaced by the resolved auth guard, so two different guards or providers can never collide on the same numeric id — see `key_namespace` above for a tenant-per-database app that needs a further namespace) and still encrypted the same way. A cache write that fails outright (a `null` store, a driver error) raises instead of reporting success, since a saved-but-not-really-saved credential is a worse outcome than a visible error. In this mode a profile does **not** die with the session — logging out does not delete it, only an explicit `forget()`/delete or the configured `ttl_minutes` does — and it is shared live across every concurrent session of that user, not just a later re-login. This is a deliberate, opt-in trade-off; see [Configuration reference](#configuration-reference) for the two config keys and their defaults (`false` / 30 days) before turning it on. A profile also carries `server_variables`, the values substituted into a server template; that map is ordinary non-secret data and is returned in the clear like `base_url`, so a credential must never be put in it. Profile list and lookup responses omit the ciphertext and plaintext; they return only profile metadata and `credential_hint`, which is `****` for credentials of eight characters or fewer and `****` plus the last four characters otherwise. The outbound request path is the only code path that decrypts a credential. Reads never return a usable credential to the browser, so the panel does not regain one after profile creation. The browser keeps two stores, both bound to the current account so a different user on the same browser starts empty. The selected profile id, selected server, server variable values and plain base URL — all non-secret — live under `api-dock:try-it` in `localStorage`. The form values the reader typed per operation live under `api-dock:try-it-draft` in `sessionStorage`, so they survive a reload but are gone when the tab closes. Before a draft is stored, every header parameter is dropped, and so is any parameter detected as sensitive (a `password` format, `writeOnly`, a declared API-key name, or a credential-like name such as `password` or `client_secret`); a request body that names such a field anywhere is dropped whole. Neither store ever holds a credential, a credential header value, or a `credential_hint`. Detection is name-based, so a secret in an unrecognised field can still reach the tab-scoped draft — avoid typing a live secret into the form on a shared browser. One consequence is worth stating plainly: with the `cookie` session driver the whole session payload lives in the reader's browser, so the encrypted profile travels with it. Use a server-side session driver — `database`, `redis`, `file` — if you enable the try-it proxy.
 
 Response bodies are capped at `try_it.max_response_bytes`. Content beyond the cap is discarded, the returned body is truncated to the cap, and the response carries `truncated: true`; the proxy does not buffer an unbounded body. Hop-by-hop headers, cookies, forwarding headers, CSRF headers, proxy-prefixed headers, and browser `Sec-*` headers are stripped in both directions.
 

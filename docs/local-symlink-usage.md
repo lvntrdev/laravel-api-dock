@@ -48,7 +48,10 @@ composer show lvntr/api-dock | grep versions
 
 1. Revert the requirement to the version constraint you noted above (e.g.
    `"^0.0.5"`).
-2. Delete the `repositories` block.
+2. Remove only the `path` entry from `repositories`. Keep the `vcs` entry
+   from [Installation](../README.md#installation) — the package is not on
+   Packagist, so without it Composer cannot find the package. If you
+   replaced it while linking, add it back.
 3. `composer update lvntr/api-dock`.
 
 `vendor/lvntr/api-dock` goes back to a real download and `composer.lock`
