@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-import { hasSecretKey, isSecretKey } from '@/lib/tryItToken'
+import { blankSecrets, isSecretKey } from '@/lib/tryItToken'
 import type { ParameterObject, SchemaObject } from '@/types/openapi'
 
 const STORAGE_KEY = 'api-dock:try-it'
@@ -224,9 +224,9 @@ export function storedOperationInputs(operationKey: string): TryItOperationInput
  * typed, only the copy that survives a reload is cut down.
  *
  * Header parameters go as a class — an api key, a bearer value and a signed hash all
- * arrive that way, and none of them belongs in `localStorage`. The body goes WHOLE
- * rather than field by field: a body with one field masked restores as a request that
- * cannot be sent, which is worse than an empty one the reader retypes.
+ * arrive that way, and none of them belongs in web storage. The body keeps every field
+ * but its credentials, which restore empty: a login form comes back with the email
+ * filled in and only the password left to retype.
  */
 export function classifyInputs(
   inputs: TryItOperationInputs,
@@ -248,7 +248,7 @@ export function classifyInputs(
       Object.entries(inputs.parameters)
         .filter(([key]) => !key.startsWith('header:') && !secretKeys.has(key)),
     ),
-    body: hasSecretKey(inputs.body) ? '' : inputs.body,
+    body: blankSecrets(inputs.body),
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { extractToken, hasSecretKey, redactTokens } from '@/lib/tryItToken'
+import { blankSecrets, extractToken, hasSecretKey, redactTokens } from '@/lib/tryItToken'
 
 describe('extractToken', () => {
   it('reads a flat token field', () => {
@@ -79,5 +79,20 @@ describe('hasSecretKey', () => {
 
     expect(redactTokens(deep)).toBe('')
     expect(hasSecretKey(deep)).toBe(true)
+  })
+})
+
+describe('blankSecrets', () => {
+  it('empties every credential value and keeps the rest of the body and its layout', () => {
+    expect(blankSecrets('{"email":"a@b.test","user":{"Password":"hunter2","pin":1234,"otp_secret":7}}'))
+      .toBe('{"email":"a@b.test","user":{"Password":"","pin":1234,"otp_secret":7}}')
+    expect(blankSecrets('{\n  "email": "a@b.test",\n  "password": "hunter2"\n}'))
+      .toBe('{\n  "email": "a@b.test",\n  "password": ""\n}')
+    expect(blankSecrets('not json')).toBe('not json')
+  })
+
+  it('empties a structured credential whole and keeps a secret-free body byte for byte', () => {
+    expect(blankSecrets('{"password":{"value":"hunter2"},"tags":["a"]}')).toBe('{"password":"","tags":["a"]}')
+    expect(blankSecrets('{"id":9007199254740993}')).toBe('{"id":9007199254740993}')
   })
 })

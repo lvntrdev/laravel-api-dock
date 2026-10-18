@@ -10,6 +10,15 @@ All notable changes to this project are documented in this file.
 - **Switching profiles from Settings no longer sends the new credential to the previous profile's server.** The rule that releases the previous profile's base URL and server variables lived only in the try-it panel, which is unmounted while Settings is open. Every switch — the try-it picker, the Settings list, creating or deleting a profile, a refreshed list losing the selected one — now goes through one shared function.
 - **A deleted credential profile can no longer be resurrected by an in-flight request.** Laravel runs requests of one session in parallel, so a try-it request that started before a delete wrote the old session back when it finished. API Dock routes now use Laravel's session blocking, with a lock longer than the outbound timeout, when the session cache store supports atomic locks. Host-application routes sharing the session are not serialized by this.
 
+### Added
+
+- **Copy buttons on the changelog page.** Each entry copies `METHOD /path — summary`; each release date copies the date followed by all of its entries, one per line.
+
+### Changed
+
+- **A login's token becomes the active profile on its own.** When a try-it request sent a credential (`password`, `refresh_token`, …) and the response returns a token, it is saved as a bearer profile and selected without a click; the profile the previous login of the same endpoint created is replaced, so repeated logins do not push other profiles out past `max_profiles`. A token in any other response is still only offered through the key button.
+- **A try-it body that names a credential is remembered without it.** A login body used to be dropped from the draft entirely, so a reload brought back an empty form. The draft now keeps every field and restores credential fields (`password`, `token`, `client_secret`, …) empty, so only the password has to be retyped. The credential itself still never reaches web storage.
+
 ### Fixed
 
 - **Try-it sends the request body exactly as written.** The panel parsed the editor JSON and the proxy re-encoded it, turning `{}` into `[]`, `{"metadata":{}}` into `{"metadata":[]}` and a bare `"hello"` into an unquoted string. The validated editor text is now forwarded verbatim.

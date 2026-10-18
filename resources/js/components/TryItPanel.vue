@@ -8,13 +8,14 @@ import { keepTabInside } from '@/lib/modalFocus'
 import { isReference, resolvePointer, resolveSchema, sampleFromSchema } from '@/lib/schema'
 import {
   createProfile,
+  deleteProfile,
   loadProfiles,
   loadingProfiles,
   profileDenied,
   profileError,
   profiles,
 } from '@/lib/tryItProfiles'
-import { REDACTED, extractToken } from '@/lib/tryItToken'
+import { REDACTED, extractToken, hasSecretKey } from '@/lib/tryItToken'
 import { vTooltip } from '@/lib/tooltip'
 import { setStoredResponse, storedResponse } from '@/lib/tryItResponses'
 import {
@@ -132,6 +133,9 @@ const savingToken = ref(false)
 // Reset with every send below, so the confirmation belongs to the response on screen
 // rather than to a profile made from an earlier one.
 const tokenSaved = ref(false)
+// Where the request on screen actually went, taken when it was sent: the reader can switch
+// profile or server while a login is in flight, and its token belongs to the old target.
+const sentTarget = ref<{ baseUrl: string, serverVariables: Record<string, string> }>()
 // Which dialog is open, if any. One at a time by construction: both use the same overlay,
 // so the focus trap below has a single panel to keep the tab ring inside.
 const expandedPanel = ref<'body' | 'headers' | 'request' | ''>('')
@@ -286,6 +290,9 @@ async function sendRequest(): Promise<void> {
   responseResult.value = undefined
   elapsedMs.value = undefined
   tokenSaved.value = false
+  sentTarget.value = { baseUrl: resolvedBaseUrl.value, serverVariables: { ...applicableServerVariables.value } }
+  // Read now for the same reason: an edit while the request is pending is not what was sent.
+  const sentCredential = !bodyless.value && hasSecretKey(bodyText.value)
   // Dropped before the request goes out: a failed send must not leave the previous
   // response behind to be shown again on the next visit as if it were this one's.
   setStoredResponse(props.operation.key, undefined)
@@ -342,6 +349,14 @@ async function sendRequest(): Promise<void> {
       ...responseResult.value,
       elapsedMs: elapsedMs.value ?? 0,
     })
+
+    // A request that sent a credential and got a token back is a login, a register or a
+    // refresh: the token is taken as the profile on its own. Any other response that
+    // merely carries a `token` field — a device token, a reset token — only offers the
+    // button, since taking it would silently switch the credential every request uses.
+    if (capturedToken.value !== null && sentCredential) {
+      await useTokenAsProfile()
+    }
   } catch {
     elapsedMs.value = Math.round((performance.now() - startedAt) * 10) / 10
     requestError.value = t('tryIt.sendError')
@@ -369,21 +384,40 @@ async function copyResponseBody(): Promise<void> {
  * it is never written to web storage, and the panel only ever sees the masked hint back.
  */
 async function useTokenAsProfile(): Promise<void> {
-  if (capturedToken.value === null || savingToken.value) {
+  const token = capturedToken.value
+
+  if (token === null || savingToken.value) {
     return
   }
 
   savingToken.value = true
+  const endpointTarget = { baseUrl: props.baseUrl, csrfToken: props.csrfToken }
+  const requestTarget = sentTarget.value
+    ?? { baseUrl: resolvedBaseUrl.value, serverVariables: applicableServerVariables.value }
+  const fullLabel = t('tryIt.tokenProfileLabel', { path: props.operation.path })
+  // The profile endpoint caps a label at 64 characters and this action has no label
+  // field to shorten it in, so a long path is cut here rather than answered with 422.
+  const label = fullLabel.slice(0, 64)
+  // Every login creates a profile, so the one the previous login of this endpoint made is
+  // replaced: left in place they would pile up and push the reader's own profiles out
+  // past `max_profiles`. A cut label may be shared by another path, so it replaces nothing.
+  const stale = fullLabel.length <= 64
+    ? profiles.value.filter((profile) => profile.label === label).map((profile) => profile.id)
+    : []
 
   try {
-    const created = await createProfile({ baseUrl: props.baseUrl, csrfToken: props.csrfToken }, {
-      // The profile endpoint caps a label at 64 characters and this action has no label
-      // field to shorten it in, so a long path is cut here rather than answered with 422.
-      label: t('tryIt.tokenProfileLabel', { path: props.operation.path }).slice(0, 64),
-      baseUrl: resolvedBaseUrl.value,
-      serverVariables: applicableServerVariables.value,
+    // Deleted BEFORE the new one is created: the server evicts the oldest profile once the
+    // list is full, and that would be one of the reader's own rather than the stale login.
+    for (const id of stale) {
+      await deleteProfile(endpointTarget, id, variableDefaults())
+    }
+
+    const created = await createProfile(endpointTarget, {
+      label,
+      baseUrl: requestTarget.baseUrl,
+      serverVariables: requestTarget.serverVariables,
       scheme: 'bearer',
-      credential: capturedToken.value,
+      credential: token,
       credentialHeader: '',
     }, variableDefaults())
 

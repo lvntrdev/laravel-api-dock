@@ -7,6 +7,7 @@ import {
   operationInputs,
   plainBaseUrl,
   resetTryItSession,
+  selectedProfileId,
   serverVariables,
   setPlainBaseUrl,
   setSelectedProfileId,
@@ -504,15 +505,14 @@ describe('TryItPanel', () => {
     wrapper.unmount()
   })
 
-  it('drops a whole body that names a credential and stores an ordinary one verbatim', async () => {
+  it('empties only the credential of a stored body and stores an ordinary one verbatim', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [] })))
     const wrapper = mountPanel()
     await flushPromises()
 
     await wrapper.get('[data-testid="body-editor"]').setValue('{"email":"a@b.test","password":"hunter2"}')
 
-    // Half a body would restore as a request that cannot be sent, so none of it is kept.
-    expect(operationInputs.value[operation.key]?.body).toBe('')
+    expect(operationInputs.value[operation.key]?.body).toBe('{"email":"a@b.test","password":""}')
     expect(window.sessionStorage.getItem('api-dock:try-it-draft') ?? '').not.toContain('hunter2')
     expect(window.localStorage.getItem('api-dock:try-it') ?? '').not.toContain('hunter2')
 
@@ -558,6 +558,47 @@ describe('TryItPanel', () => {
     expect(second.get('[data-testid="response-body"]').text()).not.toContain('real.token.value')
     expect(second.find('[data-testid="use-token-as-profile"]').exists()).toBe(false)
     second.unmount()
+  })
+
+  it('takes the token of a login as the profile and replaces the one the previous login made', async () => {
+    const storedProfile = (id: string) => ({
+      id, label: 'Token from /users/{id}', base_url: '', scheme: 'bearer', credential_header: null, credential_hint: '…',
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [storedProfile('old')] }))
+      .mockResolvedValueOnce(jsonResponse({ status: 200, headers: {}, body: '{"token":"fresh.token"}' }))
+      .mockResolvedValueOnce(jsonResponse({}))
+      .mockResolvedValueOnce(jsonResponse({ profile: storedProfile('new') }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="body-editor"]').setValue('{"email":"a@b.test","password":"hunter2"}')
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+
+    // The stale login profile goes first, so a full list cannot evict one of the reader's own.
+    expect(fetchMock.mock.calls[2][0]).toContain('/try-it/profiles/old')
+    expect(fetchMock.mock.calls[2][1].method).toBe('DELETE')
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toMatchObject({ scheme: 'bearer', credential: 'fresh.token' })
+    expect(selectedProfileId.value).toBe('new')
+    wrapper.unmount()
+  })
+
+  it('only offers the token of a request that sent no credential', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+      .mockResolvedValueOnce(jsonResponse({ status: 200, headers: {}, body: '{"token":"device.token"}' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="send-request"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="use-token-as-profile"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('prefills the body from a referenced schema when the spec ships no example', async () => {

@@ -35,6 +35,22 @@ composer update lvntr/api-dock --with-all-dependencies
 `vendor/lvntr/api-dock` is now a symlink into this repo — edits here show up
 in the consuming app immediately, no `composer update` needed per change.
 
+## Serve the built panel live
+
+The panel is served from `public/vendor/api-dock`, which is a **copy** of this
+repo's `resources/dist` made by `vendor:publish` — the Composer symlink does not
+reach it. Replace that copy with a symlink once, in the consuming app:
+
+```bash
+rm -rf public/vendor/api-dock
+ln -s ../../vendor/lvntr/api-dock/resources/dist public/vendor/api-dock
+```
+
+Every `npm run build` here is then served immediately. The asset URL carries the
+file's modification time, so the browser cache does not hold the old bundle. To
+undo it, remove the link and run
+`php artisan vendor:publish --tag=api-dock-assets --force`.
+
 ## Before you link: note the current version
 
 If a real version was already installed, check what it was so you can

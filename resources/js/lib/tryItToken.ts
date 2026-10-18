@@ -102,11 +102,7 @@ export function isSecretKey(name: string): boolean {
   return SECRET_KEYS.has(name.toLowerCase())
 }
 
-/**
- * True when the JSON body names a credential anywhere the walk reaches. Used on the
- * REQUEST side, where the answer is all-or-nothing: a body with a masked field would
- * restore as a request that cannot be sent, so the caller drops the whole body.
- */
+/** True when the JSON body names a credential anywhere the walk reaches. */
 export function hasSecretKey(body: string): boolean {
   let parsed: unknown
 
@@ -150,6 +146,30 @@ export function redactTokens(body: string): string {
   } catch {
     // Same stack exhaustion as above, on the response side: a body that could not be
     // masked is not stored at all.
+    return ''
+  }
+}
+
+/**
+ * The same request body with every credential value emptied, for the REQUEST side: the
+ * draft that outlives a reload keeps the email and the rest of the payload, and the
+ * reader retypes only the password. Emptied rather than masked — `***` would be sent as
+ * the password if the reader missed it. A body that does not parse is returned as it
+ * was, the same answer `hasSecretKey` gives it; one too deep to walk is not kept.
+ */
+export function blankSecrets(body: string): string {
+  // A body with nothing to empty is kept verbatim: a JSON round trip would round an id
+  // past 2^53 and restore a request that targets a different record.
+  if (!hasSecretKey(body)) {
+    return body
+  }
+
+  try {
+    // The reader's layout is kept as far as JSON allows: a body typed on one line
+    // restores on one line, anything else as the editor's two-space default.
+    return JSON.stringify(blankValue(JSON.parse(body)), null, body.includes('\n') ? 2 : undefined) ?? ''
+  } catch {
+    // Too deep to walk, the same case `hasSecretKey` answers with true: not kept.
     return ''
   }
 }
@@ -199,5 +219,21 @@ function redactValue(value: unknown): unknown {
     const scalar = typeof nested === 'string' || typeof nested === 'number'
 
     return [key, isSecretKey(key) && scalar ? REDACTED : redactValue(nested)]
+  }))
+}
+
+function blankValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => blankValue(item))
+  }
+
+  if (!isRecord(value)) {
+    return value
+  }
+
+  // Unlike the response side, the WHOLE value under a credential name goes, whatever its
+  // shape: `password: { value: '…' }` must not keep the string one level down.
+  return Object.fromEntries(Object.entries(value).map(([key, nested]) => {
+    return [key, isSecretKey(key) ? '' : blankValue(nested)]
   }))
 }

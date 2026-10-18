@@ -2750,12 +2750,46 @@ kbd {
   gap: 6px;
 }
 
+.api-changelog__item {
+  position: relative;
+}
+
+/* A sibling of the entry, not a child: a button cannot nest inside the entry's button. */
+.api-changelog__copy {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  color: var(--text-muted);
+  border-color: var(--border-color);
+  transform: translateY(-50%);
+}
+
+.api-changelog__release-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-changelog__copy-release {
+  width: 22px;
+  height: 22px;
+  color: var(--text-muted);
+  border-color: var(--border-color);
+}
+
+.api-changelog__copy-release:hover,
+.api-changelog__copy:hover {
+  color: var(--primary-color);
+  background: var(--inset-bg);
+  border-color: var(--primary-color);
+}
+
 .api-changelog__entry {
   display: flex;
   width: 100%;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 10px 50px 10px 12px;
   background: var(--surface-100);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);

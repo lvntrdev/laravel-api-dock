@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import { collectChangelog, countChangelogEntries } from '@/lib/changelog'
 import { t } from '@/lib/i18n'
+import { vTooltip } from '@/lib/tooltip'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
 
 const props = defineProps<{
@@ -21,6 +22,18 @@ const breakingCount = computed(() =>
     0,
   ),
 )
+
+const copied = ref<string | null>(null)
+
+type Entry = { summary: string, operation: OperationEntry }
+
+const entryLine = (entry: Entry): string =>
+  `${entry.operation.method.toUpperCase()} ${entry.operation.path} — ${entry.summary}`
+
+async function copyText(key: string, text: string): Promise<void> {
+  await navigator.clipboard.writeText(text)
+  copied.value = key
+}
 </script>
 
 <template>
@@ -40,9 +53,21 @@ const breakingCount = computed(() =>
 
     <ol v-else class="api-changelog__releases">
       <li v-for="release in releases" :key="release.date" class="api-changelog__release">
-        <h2><time>{{ release.date }}</time></h2>
+        <h2 class="api-changelog__release-heading">
+          <time>{{ release.date }}</time>
+          <button
+            type="button"
+            class="code-copy-button api-changelog__copy-release"
+            v-tooltip="copied === release.date ? t('common.copied') : t('common.copy')"
+            :aria-label="copied === release.date ? t('common.copied') : t('common.copy')"
+            data-testid="copy-changelog-release"
+            @click="copyText(release.date, [release.date, ...release.entries.map(entryLine)].join('\n'))"
+          >
+            <i :class="copied === release.date ? 'pi pi-check' : 'pi pi-copy'" />
+          </button>
+        </h2>
         <ul>
-          <li v-for="(entry, index) in release.entries" :key="`${entry.operation.key}:${index}`">
+          <li v-for="(entry, index) in release.entries" :key="`${entry.operation.key}:${index}`" class="api-changelog__item">
             <button
               type="button"
               class="api-changelog__entry"
@@ -58,6 +83,16 @@ const breakingCount = computed(() =>
               <span v-if="entry.breaking" class="api-changelog__breaking">
                 {{ t('ai.breaking') }}
               </span>
+            </button>
+            <button
+              type="button"
+              class="code-copy-button api-changelog__copy"
+              v-tooltip="copied === `${release.date}:${index}` ? t('common.copied') : t('common.copy')"
+              :aria-label="copied === `${release.date}:${index}` ? t('common.copied') : t('common.copy')"
+              data-testid="copy-changelog-entry"
+              @click="copyText(`${release.date}:${index}`, entryLine(entry))"
+            >
+              <i :class="copied === `${release.date}:${index}` ? 'pi pi-check' : 'pi pi-copy'" />
             </button>
           </li>
         </ul>
