@@ -302,6 +302,8 @@ final class ProxyController
             return null;
         }
 
+        // The panel sends the editor text as a string precisely so the object/array shape
+        // survives: re-encoding a decoded body turns `{}` into `[]` and unquotes a bare string.
         if (is_string($body)) {
             return $body;
         }

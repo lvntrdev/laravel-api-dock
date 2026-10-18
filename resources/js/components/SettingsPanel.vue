@@ -3,7 +3,12 @@ import { computed, onMounted, reactive } from 'vue'
 
 import { formatDuration, locale, t } from '@/lib/i18n'
 import { collectOperations } from '@/lib/operations'
-import { narrowServerVariables, resolveServerPreview, withCurrentOrigin } from '@/lib/tryIt'
+import {
+  initialServerVariables,
+  narrowServerVariables,
+  resolveServerPreview,
+  withCurrentOrigin,
+} from '@/lib/tryIt'
 import type { TryItProfile } from '@/lib/tryIt'
 import {
   createProfile as createStoredProfile,
@@ -23,9 +28,9 @@ import {
   selectedServer as storedSelectedServer,
   serverVariables,
   setPlainBaseUrl,
-  setSelectedProfileId,
   setSelectedServer,
   setServerVariable,
+  switchProfile,
 } from '@/lib/tryItSession'
 import type { OpenApiDocument, ServerObject, ServerVariableObject } from '@/types/openapi'
 
@@ -135,7 +140,7 @@ async function submitProfile(): Promise<void> {
     scheme: profileForm.scheme,
     credential: profileForm.credential,
     credentialHeader: profileForm.credentialHeader,
-  })
+  }, releasedVariableDefaults())
 
   // The write-only value leaves component state whether or not the request landed.
   profileForm.credential = ''
@@ -151,7 +156,7 @@ async function submitProfile(): Promise<void> {
 }
 
 async function removeProfile(id: string): Promise<void> {
-  await deleteStoredProfile(endpointTarget(), id)
+  await deleteStoredProfile(endpointTarget(), id, releasedVariableDefaults())
 }
 
 function endpointTarget(): { baseUrl: string; csrfToken: string } {
@@ -165,6 +170,13 @@ function defaultServerVariables(): Record<string, string> {
       definition.default ?? '',
     ]),
   )
+}
+
+// What a variable a profile supplied returns to when that profile is switched away
+// from: the default of the server this panel targets, else the default of whichever
+// server declares it — the same values the editors below start from.
+function releasedVariableDefaults(): Record<string, string> {
+  return { ...defaultServerVariables(), ...initialServerVariables(documentServer.value) }
 }
 
 function resetProfileServerVariables(): void {
@@ -201,8 +213,14 @@ function isSelected(id: string): boolean {
   return storedSelectedProfileId.value === id
 }
 
+// Through the shared switch, not the id alone: the try-it panel is unmounted while this
+// one is open, and the previous profile's target must not stay behind for the next one.
 function selectProfile(id: string): void {
-  setSelectedProfileId(id)
+  switchProfile(
+    profiles.value.find((profile) => profile.id === id),
+    profiles.value.find((profile) => profile.id === storedSelectedProfileId.value),
+    releasedVariableDefaults(),
+  )
 }
 </script>
 

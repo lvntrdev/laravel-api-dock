@@ -68,6 +68,21 @@ describe('try-it session persistence', () => {
     expect(JSON.parse(lastStoredValue(storage))).toMatchObject({ selectedProfileId: '' })
   })
 
+  it('drops a released variable it has no default for, so the server default applies again', async () => {
+    vi.stubGlobal('localStorage', storageStub(JSON.stringify({
+      selectedProfileId: 'expired',
+      serverVariables: { tenant: 'globex', region: 'eu' },
+    })))
+    const session = await import('@/lib/tryItSession')
+
+    // A list refresh: it still knows the lost profile but no server defaults.
+    session.discardMissingProfile(['other'], [
+      { id: 'expired', base_url: '', server_variables: { tenant: 'globex' } },
+    ])
+
+    expect(session.serverVariables.value).toEqual({ region: 'eu' })
+  })
+
   it('purges state another account left in this browser', async () => {
     const storage = storageStub(JSON.stringify({
       identity: 'account-a',

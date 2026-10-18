@@ -8,6 +8,8 @@ import {
   plainBaseUrl,
   resetTryItSession,
   serverVariables,
+  setPlainBaseUrl,
+  setSelectedProfileId,
   setServerVariable,
 } from '@/lib/tryItSession'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
@@ -175,12 +177,36 @@ describe('TryItPanel', () => {
     await wrapper.get('[data-testid="profile-select"]').setValue(second.id)
 
     expect(plainBaseUrl.value).toBe('')
-    expect(serverVariables.value.tenant).toBe('')
+    // No server declares `tenant`, so the released value is dropped, not blanked.
+    expect(serverVariables.value).not.toHaveProperty('tenant')
     expect(JSON.parse(window.localStorage.getItem('api-dock:try-it') ?? '{}')).toMatchObject({
       selectedProfileId: second.id,
       plainBaseUrl: '',
     })
     wrapper.unmount()
+  })
+
+  it('applies a stored profile once its list loads, and not again over a typed address on remount', async () => {
+    const profile = tryItProfile({ id: 'profile-1', base_url: 'https://staging.example.com/api' })
+    // A fresh object per fetch, as a real response is: the refetch on remount must not
+    // read as a newly selected profile.
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResponse({ profiles: [{ ...profile }] }))))
+    // What a reload leaves: the id survives in storage, the list has not arrived yet.
+    setSelectedProfileId(profile.id)
+    const first = mountPanel()
+    await flushPromises()
+
+    expect(plainBaseUrl.value).toBe(profile.base_url)
+
+    setPlainBaseUrl('https://mine.example.com/api')
+    first.unmount()
+
+    // Navigating to another operation remounts the panel and refetches the same list.
+    const second = mountPanel()
+    await flushPromises()
+
+    expect(plainBaseUrl.value).toBe('https://mine.example.com/api')
+    second.unmount()
   })
 
   it('previews the same target it sends when a stored value is outside the enum', async () => {
@@ -238,6 +264,27 @@ describe('TryItPanel', () => {
     expect(sent.server_variable_spec).toBeUndefined()
     wrapper.unmount()
   })
+
+  it.each(['{}', '{"metadata":{}}', '"hello"', '{ "a": 1,\n  "b": {} }'])(
+    'sends the body %j as the exact editor text',
+    async (text) => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse({ profiles: [] }))
+        .mockResolvedValueOnce(jsonResponse({ status: 200, headers: {}, body: '{}' }))
+      vi.stubGlobal('fetch', fetchMock)
+      const wrapper = mountPanel()
+      await flushPromises()
+
+      await wrapper.get('[data-testid="body-editor"]').setValue(text)
+      await wrapper.get('[data-testid="send-request"]').trigger('click')
+      await flushPromises()
+
+      const sent = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)) as Record<string, unknown>
+
+      expect(sent.body).toBe(text)
+      wrapper.unmount()
+    },
+  )
 
   it('never sends a persisted profile id the panel could not load', async () => {
     window.localStorage.setItem('api-dock:try-it', JSON.stringify({

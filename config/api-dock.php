@@ -104,7 +104,9 @@ return [
             // while every tenant shares one cache store — set a closure here that
             // returns the current tenant's id (e.g. `fn () => tenant('id')`) to also
             // namespace by tenant. Leave null for a single-tenant app; the guard+id key
-            // is already unique there.
+            // is already unique there. The closure must return a non-empty string or an
+            // int; anything else (null, '', a non-callable value) makes that request fall
+            // back to session storage rather than to a key shared across tenants.
             'key_namespace' => null,
         ],
     ],

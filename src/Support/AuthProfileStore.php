@@ -271,9 +271,15 @@ final readonly class AuthProfileStore
     /**
      * Runs a read-modify-write against the active store as one atomic step.
      *
-     * In session mode a request already holds that session's own file lock for
-     * its whole lifetime, so two requests against one session already run one
-     * after another — no extra lock is needed there. In persistent mode the
+     * In session mode no lock is taken here, and none would help: Laravel does
+     * not lock a session by default — overlapping requests each load their own
+     * copy and each write the whole session back when they end, so a try-it
+     * that started before a delete would save the deleted profile again. That
+     * ordering is enforced one level up instead: every API Dock route is
+     * session-blocked (routes/api-dock.php), so requests against one session
+     * run one after another, provided the session lock store supports atomic
+     * locks. What stays out of reach is a host-app route sharing the session:
+     * Laravel serializes it only if the host blocks it too. In persistent mode the
      * cache key is shared across every concurrent session of the same user, and
      * a cache store carries no such lock on its own: two overlapping requests
      * could both read the same old array, and the later `put()` would silently
@@ -344,7 +350,8 @@ final readonly class AuthProfileStore
 
     /**
      * The persistent-mode storage key, or null when this request must use the
-     * session instead — the flag is off, or nobody is authenticated.
+     * session instead — the flag is off, nobody is authenticated, or a
+     * configured key_namespace yielded no usable value.
      */
     private function cacheKey(): ?string
     {
@@ -362,6 +369,11 @@ final readonly class AuthProfileStore
      * Recomputed per call rather than cached on the instance: `Auth::id()` is a
      * property of the request, and a store instance that outlived one request
      * would otherwise write under the previous user's key.
+     *
+     * Null — and so session mode — for a guest, an exotic id type, or a
+     * configured `key_namespace` that did not yield a non-empty string or int
+     * (see tenantNamespace()). `flush()` then clears only the session and never
+     * touches a key another tenant could share.
      */
     private static function userCacheKey(): ?string
     {
@@ -395,6 +407,13 @@ final readonly class AuthProfileStore
 
         $namespace = self::tenantNamespace();
 
+        // A configured key_namespace that produced no usable value fails closed
+        // to the session, the same way a guest does — never to the
+        // namespace-less key that other tenants share.
+        if ($namespace === false) {
+            return null;
+        }
+
         return self::CACHE_KEY_PREFIX.($namespace !== null ? $namespace.':' : '').$guard.':'.$userId;
     }
 
@@ -405,19 +424,38 @@ final readonly class AuthProfileStore
      * generic "current tenant" in Laravel itself, so this stays a plain
      * closure the host app configures; the default (none) is correct for the
      * common single-tenant case, where the id is already unique.
+     *
+     * Three outcomes, deliberately kept apart:
+     *  - null: no resolver configured — no segment at all.
+     *  - string: the resolver returned a non-empty string or an int (most tenant
+     *    ids are integer keys; an int is cast to its string form).
+     *  - false: a resolver IS configured but is not callable, or returned
+     *    anything else (null, '', bool, float, array, object). The caller must
+     *    treat this as "no safe persistent key", never as "no segment": dropping
+     *    the segment would put every tenant with the same guard and user id on
+     *    one shared key, handing one tenant's credential to another.
      */
-    private static function tenantNamespace(): ?string
+    private static function tenantNamespace(): string|false|null
     {
         /** @var mixed $resolver */
         $resolver = config('api-dock.try_it.profile_persistence.key_namespace');
 
-        if (! is_callable($resolver)) {
+        if ($resolver === null) {
             return null;
         }
 
+        if (! is_callable($resolver)) {
+            return false;
+        }
+
+        /** @var mixed $namespace */
         $namespace = $resolver();
 
-        return is_string($namespace) && $namespace !== '' ? $namespace : null;
+        if (is_int($namespace)) {
+            return (string) $namespace;
+        }
+
+        return is_string($namespace) && $namespace !== '' ? $namespace : false;
     }
 
     private static function persistenceEnabled(): bool

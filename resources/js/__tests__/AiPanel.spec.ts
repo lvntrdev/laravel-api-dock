@@ -124,7 +124,10 @@ describe('AiPanel MCP tool', () => {
 
     expect(Object.keys(definition.inputSchema.properties)).toEqual(['id', 'email', 'body_id'])
     expect(definition.inputSchema.properties.email).toEqual({ type: 'string' })
-    expect(definition.inputSchema.properties.body_id).toEqual({ type: 'integer' })
+    expect(definition.inputSchema.properties.body_id).toEqual({
+      type: 'integer',
+      description: '(request body property "id")',
+    })
     expect(definition.inputSchema.properties.body).toBeUndefined()
     expect(definition.inputSchema.required).toEqual(['id', 'email'])
   })
@@ -145,6 +148,112 @@ describe('AiPanel MCP tool', () => {
 
     expect(definition.inputSchema.properties.body).toEqual({ type: 'array', items: { type: 'string' } })
     expect(definition.inputSchema.required).toEqual(['body'])
+  })
+})
+
+describe('AiPanel MCP tool reference resolution and naming', () => {
+  type Tool = { inputSchema: { properties: Record<string, Record<string, unknown>>; required: string[] } }
+
+  async function toolFor(
+    schemas: Record<string, unknown>,
+    operation: OperationEntry['operation'],
+    parameters: OperationEntry['parameters'] = [],
+  ): Promise<Tool> {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const wrapper = mount(AiPanel, {
+      props: {
+        document: { openapi: '3.1.0', paths: {}, components: { schemas } } as OpenApiDocument,
+        operation: entry(operation, parameters),
+      },
+    })
+
+    await wrapper.get('.artifact-actions button:first-child').trigger('click')
+
+    return JSON.parse(String(writeText.mock.calls[0]?.[0] ?? '')) as Tool
+  }
+
+  it('inlines nested references so the copied schema carries no $ref', async () => {
+    const definition = await toolFor(
+      {
+        User: { type: 'object', properties: { name: { type: 'string' } } },
+        Team: { type: 'object', properties: { owner: { $ref: '#/components/schemas/User' } } },
+      },
+      {
+        operationId: 'createTeam',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  items: { $ref: '#/components/schemas/User' },
+                  list: { type: 'array', items: { $ref: '#/components/schemas/Team' } },
+                  note: { $ref: '#/components/schemas/User', description: 'Override' },
+                },
+              },
+            },
+          },
+        },
+      },
+    )
+
+    expect(JSON.stringify(definition)).not.toContain('$ref')
+    expect(definition.inputSchema.properties.items).toEqual({ type: 'object', properties: { name: { type: 'string' } } })
+    expect(definition.inputSchema.properties.list).toEqual({
+      type: 'array',
+      items: { type: 'object', properties: { owner: { type: 'object', properties: { name: { type: 'string' } } } } },
+    })
+    expect(definition.inputSchema.properties.note.description).toBe('Override')
+  })
+
+  it('terminates on a self-referencing component and turns a dangling reference into an empty schema', async () => {
+    const definition = await toolFor(
+      { Node: { type: 'object', properties: { child: { $ref: '#/components/schemas/Node' } } } },
+      {
+        operationId: 'tree',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  root: { $ref: '#/components/schemas/Node' },
+                  missing: { $ref: '#/components/schemas/Gone' },
+                },
+              },
+            },
+          },
+        },
+      },
+    )
+
+    expect(JSON.stringify(definition)).not.toContain('$ref')
+    expect(definition.inputSchema.properties.root).toEqual({
+      type: 'object',
+      properties: { child: {} },
+    })
+    expect(definition.inputSchema.properties.missing).toEqual({})
+  })
+
+  it('keeps path.id, path.query_id and query.id as three distinct properties', async () => {
+    const definition = await toolFor(
+      {},
+      { operationId: 'search' },
+      [
+        { name: 'query_id', in: 'path', required: true, schema: { type: 'integer' } },
+        { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+        { name: 'id', in: 'query', schema: { type: 'boolean' } },
+      ],
+    )
+
+    expect(Object.keys(definition.inputSchema.properties)).toEqual(['query_id', 'id', 'query_id_2'])
+    expect(definition.inputSchema.properties.query_id).toEqual({ type: 'integer' })
+    expect(definition.inputSchema.properties.id).toEqual({ type: 'string' })
+    expect(definition.inputSchema.properties.query_id_2).toEqual({
+      type: 'boolean',
+      description: '(query parameter "id")',
+    })
   })
 })
 

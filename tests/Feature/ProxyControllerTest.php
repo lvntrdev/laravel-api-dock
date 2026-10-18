@@ -434,6 +434,18 @@ it('refuses a request body over the configured cap instead of shipping it upstre
     Http::assertNothingSent();
 });
 
+it('forwards a string body byte for byte so an empty object is not re-encoded as a list', function (): void {
+    Http::fake(['*' => Http::response('{"ok":true}', 200)]);
+
+    $this->postJson('/api-dock/try-it', [
+        'method' => 'POST',
+        'url' => 'https://api.example.com/things',
+        'body' => '{"metadata":{}}',
+    ])->assertOk();
+
+    Http::assertSent(static fn (ClientRequest $request): bool => $request->body() === '{"metadata":{}}');
+});
+
 it('answers with a placeholder instead of failing to encode a binary response body', function (): void {
     // A PNG signature: valid bytes, invalid UTF-8. json_encode() rejects it, so
     // without the guard's substitution this path leaves the proxy as a 500.

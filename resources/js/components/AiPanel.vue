@@ -219,6 +219,7 @@ function buildMcpTool(): Record<string, unknown> {
   const aiTool = operation['x-ai-tool']
   const properties: Record<string, SchemaObject> = {}
   const required: string[] = []
+  const resolveDeep = createDeepResolver()
 
   for (const candidate of props.operation.parameters) {
     const parameter = resolveParameter(candidate)
@@ -227,11 +228,13 @@ function buildMcpTool(): Record<string, unknown> {
       continue
     }
 
-    const name = uniqueName(properties, parameter.name, parameter.in)
-    const schema = resolveSchema(parameter.schema) ?? { type: 'string' }
-    properties[name] = parameter.description
-      ? { ...schema, description: parameter.description }
-      : schema
+    const schema = (resolveDeep(parameter.schema) as SchemaObject | undefined) ?? { type: 'string' }
+    const name = insertProperty(
+      properties,
+      parameter.name,
+      parameter.description ? { ...schema, description: parameter.description } : schema,
+      parameter.in,
+    )
 
     if (parameter.in === 'path' || parameter.required) {
       appendRequired(required, name)
@@ -239,10 +242,9 @@ function buildMcpTool(): Record<string, unknown> {
   }
 
   const body = resolveRequestBody()
-  const bodySchema = resolveSchema(
-    body?.content?.['application/json']?.schema
-      ?? Object.values(body?.content ?? {})[0]?.schema,
-  )
+  const rawBodySchema = body?.content?.['application/json']?.schema
+    ?? Object.values(body?.content ?? {})[0]?.schema
+  const bodySchema = rawBodySchema ? resolveDeep(rawBodySchema) as SchemaObject : undefined
 
   // Mirrors McpToolExporter::inputSchema(): the body schema's own top-level properties
   // are spread into the tool arguments (a collision is renamed with a `body_` prefix),
@@ -255,17 +257,14 @@ function buildMcpTool(): Record<string, unknown> {
       const exportedNames: Record<string, string> = {}
 
       for (const [property, candidate] of bodyProperties) {
-        const name = uniqueName(properties, property, 'body')
-        properties[name] = resolveSchema(candidate) ?? {}
-        exportedNames[property] = name
+        exportedNames[property] = insertProperty(properties, property, (candidate ?? {}) as SchemaObject, 'body')
       }
 
       for (const requiredName of bodySchema.required ?? []) {
         appendRequired(required, exportedNames[requiredName] ?? requiredName)
       }
     } else {
-      const name = uniqueName(properties, 'body', 'body')
-      properties[name] = bodySchema
+      const name = insertProperty(properties, 'body', bodySchema, 'body')
       if (body?.required) {
         appendRequired(required, name)
       }
@@ -466,16 +465,114 @@ function resolveSchema(candidate?: SchemaObject | { $ref: string }): SchemaObjec
   return resolved && !isReference(resolved) ? resolved : undefined
 }
 
-function uniqueName(
-  properties: Readonly<Record<string, SchemaObject>>,
-  requested: string,
-  source: string,
-): string {
-  if (!(requested in properties)) {
-    return requested
+/**
+ * Mirrors SpecReader::resolveNode()/resolveReference(): every local `#/components/…`
+ * reference is inlined at any depth, sibling keys override the target, and a cycle or
+ * dangling reference becomes `{}`. A reference is resolved once per build and reused,
+ * so a shared schema graph does not grow exponentially. A result produced by breaking a
+ * cycle is valid only under the ancestor chain that broke it, so it is not memoized.
+ */
+function createDeepResolver(): (node: unknown) => unknown {
+  const memo = new Map<string, unknown>()
+  const resolving = new Set<string>()
+  let cycleBreaks = 0
+
+  function resolveReference(reference: string): unknown {
+    if (memo.has(reference)) {
+      return memo.get(reference)
+    }
+    if (resolving.has(reference)) {
+      cycleBreaks++
+      return {}
+    }
+
+    const target = reference.startsWith('#/components/')
+      ? resolvePointer(props.document, reference)
+      : undefined
+
+    if (target === undefined) {
+      memo.set(reference, {})
+      return memo.get(reference)
+    }
+
+    resolving.add(reference)
+    const breaksBefore = cycleBreaks
+    const resolved = resolveNode(target)
+    resolving.delete(reference)
+
+    if (cycleBreaks === breaksBefore) {
+      memo.set(reference, resolved)
+    }
+
+    return resolved
   }
 
-  return `${source}_${requested}`.replace(/[^a-z0-9_]/gi, '_')
+  function resolveNode(node: unknown): unknown {
+    if (Array.isArray(node)) {
+      return node.map(resolveNode)
+    }
+    if (typeof node !== 'object' || node === null) {
+      return node
+    }
+
+    const record = node as Record<string, unknown>
+
+    if (typeof record.$ref === 'string') {
+      const target = resolveReference(record.$ref)
+      const { $ref: _reference, ...siblings } = record
+
+      if (!Object.keys(siblings).length) {
+        return target
+      }
+
+      const merged: Record<string, unknown> = typeof target === 'object' && target !== null && !Array.isArray(target)
+        ? { ...target }
+        : {}
+
+      for (const [key, value] of Object.entries(siblings)) {
+        merged[key] = resolveNode(value)
+      }
+
+      return merged
+    }
+
+    return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, resolveNode(value)]))
+  }
+
+  return resolveNode
+}
+
+/** Mirrors McpToolExporter::insertProperty(): `<source>_<name>`, then `_2`, `_3`… until free. */
+function insertProperty(
+  properties: Record<string, SchemaObject>,
+  name: string,
+  schema: SchemaObject,
+  source: string,
+): string {
+  let exportedName = name
+  let entry = schema
+
+  if (Object.hasOwn(properties, exportedName)) {
+    exportedName = `${source}_${name}`
+    let suffix = 2
+
+    while (Object.hasOwn(properties, exportedName)) {
+      exportedName = `${source}_${name}_${suffix}`
+      suffix++
+    }
+
+    const origin = source === 'body'
+      ? `(request body property "${name}")`
+      : `(${source} parameter "${name}")`
+    const description = typeof schema.description === 'string' && schema.description !== ''
+      ? schema.description
+      : null
+    entry = { ...schema, description: description !== null ? `${description} ${origin}` : origin }
+  }
+
+  properties[exportedName] = entry
+
+  return exportedName
 }
 
 function appendRequired(required: string[], name: string): void {

@@ -15,7 +15,6 @@ import {
   profiles,
 } from '@/lib/tryItProfiles'
 import { REDACTED, extractToken } from '@/lib/tryItToken'
-import type { StoredTryItProfile } from '@/lib/tryItProfiles'
 import { vTooltip } from '@/lib/tooltip'
 import { setStoredResponse, storedResponse } from '@/lib/tryItResponses'
 import {
@@ -27,9 +26,8 @@ import {
   serverVariables,
   setOperationInputs,
   setPlainBaseUrl,
-  setSelectedProfileId,
-  setServerVariables,
   storedOperationInputs,
+  switchProfile,
 } from '@/lib/tryItSession'
 import {
   buildCurlSample,
@@ -111,9 +109,15 @@ const plainBaseUrl = computed({
 })
 // A remembered body outranks the generated one: it is what the reader last sent.
 const bodyText = ref(remembered.body !== '' ? remembered.body : initialBodyText())
+// The picker switches through the same function as the settings list, so the previous
+// profile's target is released the same way from either panel.
 const selectedProfileId = computed({
   get: () => storedSelectedProfileId.value,
-  set: setSelectedProfileId,
+  set: (id: string) => switchProfile(
+    profiles.value.find((profile) => profile.id === id),
+    selectedProfile.value,
+    variableDefaults(),
+  ),
 })
 const sendDenied = ref('')
 const sending = ref(false)
@@ -238,26 +242,15 @@ const modalTitle = computed(() => {
 const visibleResponseHeaders = computed(() =>
   Object.entries(responseResult.value?.headers ?? {}).slice(0, RESPONSE_HEADER_LIMIT),
 )
-watch(selectedProfile, (profile, previous) => {
-  // A value the previous profile supplied must not survive the switch: leaving it in place would
-  // send the new profile's credential to the previous profile's target without any visible sign.
-  // Only untouched values are reverted — a value the user typed over is their own choice.
-  if (previous && previous.id !== profile?.id) {
-    releaseProfileValues(previous, profile)
-  }
-
-  if (!profile) {
-    return
-  }
-
-  if (profile.server_variables && Object.keys(profile.server_variables).length > 0) {
-    setServerVariables(profile.server_variables)
-  }
-
-  // A profile's own base URL applies even when the document declares servers, otherwise
-  // the environment the credential was saved for would be quietly ignored.
-  if (profile.base_url !== '') {
-    plainBaseUrl.value = profile.base_url
+// Every switch applies its profile itself; this covers only the load — the stored id
+// resolving once the list arrives after mount (a reload straight onto an operation), so
+// the profile still applies. There was no profile before it, so nothing is released. A
+// changed id is a switch that already applied, and a refreshed list that still holds the
+// same profile is not a load: re-applying on every remount would overwrite what the
+// reader typed.
+watch([storedSelectedProfileId, selectedProfile], ([id, profile], [previousId, previousProfile]) => {
+  if (profile && !previousProfile && id === previousId) {
+    switchProfile(profile, undefined, variableDefaults())
   }
 })
 
@@ -316,7 +309,10 @@ async function sendRequest(): Promise<void> {
   }
 
   if (!bodyless.value) {
-    payload.body = bodyParse.value.value
+    // The editor text, not the parsed value: the proxy re-encodes anything it receives as
+    // structured JSON, which turns `{}` into `[]` and unquotes a bare string. bodyParse above
+    // only gates sending; what goes out is exactly what the reader sees.
+    payload.body = bodyText.value
   }
 
   // The resolved profile, not the persisted id: while the list is still loading or after a failed
@@ -389,7 +385,7 @@ async function useTokenAsProfile(): Promise<void> {
       scheme: 'bearer',
       credential: capturedToken.value,
       credentialHeader: '',
-    })
+    }, variableDefaults())
 
     tokenSaved.value = created !== null
   } finally {
@@ -448,33 +444,10 @@ function updateParameter(parameter: EditableParameter, event: Event): void {
   parameter.value = (event.target as HTMLInputElement).value
 }
 
-function releaseProfileValues(
-  previous: StoredTryItProfile,
-  next: StoredTryItProfile | undefined,
-): void {
-  const previousVariables = previous.server_variables ?? {}
-  const nextVariables = next?.server_variables ?? {}
-  const released = Object.fromEntries(
-    Object.entries(previousVariables)
-      .filter(([name, value]) => {
-        return !Object.hasOwn(nextVariables, name) && serverVariables.value[name] === value
-      })
-      .map(([name]) => [name, selectedServer.value?.variables?.[name]?.default ?? '']),
-  )
-
-  if (Object.keys(released).length > 0) {
-    setServerVariables(released)
-  }
-
-  const nextBaseUrl = next?.base_url ?? ''
-
-  if (
-    previous.base_url !== ''
-    && nextBaseUrl === ''
-    && plainBaseUrl.value === previous.base_url
-  ) {
-    plainBaseUrl.value = ''
-  }
+// What a variable the previous profile supplied returns to on a switch: the default of
+// the server this request targets.
+function variableDefaults(): Record<string, string> {
+  return initialServerVariables(selectedServer.value)
 }
 
 function endpoint(suffix: string): string {

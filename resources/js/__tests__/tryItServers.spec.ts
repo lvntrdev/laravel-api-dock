@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import TryItPanel from '@/components/TryItPanel.vue'
-import { withCurrentOrigin } from '@/lib/tryIt'
+import { operationServers, withCurrentOrigin } from '@/lib/tryIt'
 import { resetProfiles } from '@/lib/tryItProfiles'
 import { resetTryItSession } from '@/lib/tryItSession'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
@@ -55,6 +55,42 @@ describe('withCurrentOrigin', () => {
     )
 
     expect(servers).toHaveLength(1)
+  })
+})
+
+describe('operationServers', () => {
+  const base: OpenApiDocument = {
+    openapi: '3.1.0',
+    servers: [{ url: 'https://doc.test' }],
+    paths: { '/things': { servers: [{ url: 'https://path.test' }] } },
+  }
+  const entry: OperationEntry = {
+    key: 'get:/things',
+    method: 'get',
+    path: '/things',
+    operation: { responses: { '200': { description: 'OK' } } },
+    parameters: [],
+  }
+
+  it('prefers the path-level servers over the document', () => {
+    expect(operationServers(base, entry)).toEqual([{ url: 'https://path.test' }])
+  })
+
+  it('prefers the operation-level servers over the path', () => {
+    const scoped: OperationEntry = {
+      ...entry,
+      operation: { ...entry.operation, servers: [{ url: 'https://op.test' }] },
+    }
+
+    expect(operationServers(base, scoped)).toEqual([{ url: 'https://op.test' }])
+  })
+
+  it('falls back to the document when the path declares none', () => {
+    const other: OperationEntry = { ...entry, path: '/other', key: 'get:/other' }
+
+    expect(operationServers(base, other)).toEqual([{ url: 'https://doc.test' }])
+    expect(operationServers({ ...base, paths: { '/things': { servers: [] } } }, entry))
+      .toEqual([{ url: 'https://doc.test' }])
   })
 })
 

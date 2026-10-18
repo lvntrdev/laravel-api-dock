@@ -8,7 +8,8 @@ namespace Lvntr\ApiDock\Support;
  * Stable change type slugs:
  * operation_removed, operation_added, response_code_removed, response_code_added,
  * required_parameter_added, optional_parameter_added, parameter_removed,
- * parameter_became_required, parameter_became_optional, request_body_became_required,
+ * parameter_became_required, parameter_became_optional, parameter_serialization_changed,
+ * request_body_became_required,
  * required_body_property_added, property_added, request_property_removed,
  * response_property_removed, response_required_property_removed,
  * type_narrowed, type_widened, enum_value_removed, enum_value_added,
@@ -558,6 +559,13 @@ final class SpecDiffer
                 );
             }
 
+            $this->compareParameterSerialization(
+                $beforeParameter,
+                $afterParameter,
+                $key,
+                $parameterPointer,
+                $operation,
+            );
             $this->compareEmbeddedSchemas(
                 $beforeParameter,
                 $afterParameter,
@@ -582,6 +590,88 @@ final class SpecDiffer
                 sprintf('%s request parameter %s was added.', $required ? 'Required' : 'Optional', $key),
             );
         }
+    }
+
+    /**
+     * `style` and `explode` decide how the value is written on the wire, so a
+     * change re-shapes every request. Compared on EFFECTIVE values: an omitted
+     * `style` is not a change from the same default written out explicitly.
+     *
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     */
+    private function compareParameterSerialization(
+        array $before,
+        array $after,
+        string $key,
+        string $pointer,
+        ?string $operation,
+    ): void {
+        // `content` parameters are serialized by their media type, not by
+        // style/explode.
+        if (array_key_exists('content', $before) || array_key_exists('content', $after)) {
+            return;
+        }
+
+        [$beforeStyle, $beforeExplode] = $this->effectiveSerialization($before);
+        [$afterStyle, $afterExplode] = $this->effectiveSerialization($after);
+
+        if ($beforeStyle !== $afterStyle) {
+            $this->addChange(
+                'breaking',
+                $pointer.'.style',
+                $operation,
+                'parameter_serialization_changed',
+                sprintf('Request parameter %s style changed from %s to %s.', $key, $beforeStyle, $afterStyle),
+            );
+        }
+
+        // `explode` only splits arrays and objects; a scalar serializes the same
+        // either way, so flipping it there changes nothing on the wire.
+        if ($beforeExplode !== $afterExplode && ! ($this->isScalarParameter($before) && $this->isScalarParameter($after))) {
+            $this->addChange(
+                'breaking',
+                $pointer.'.explode',
+                $operation,
+                'parameter_serialization_changed',
+                sprintf(
+                    'Request parameter %s explode changed from %s to %s.',
+                    $key,
+                    $beforeExplode ? 'true' : 'false',
+                    $afterExplode ? 'true' : 'false',
+                ),
+            );
+        }
+    }
+
+    /**
+     * True only when the schema declares its type(s) and none of them is an array
+     * or an object. An untyped or `$ref` schema could be either, so it is not
+     * treated as scalar.
+     *
+     * @param  array<string, mixed>  $parameter
+     */
+    private function isScalarParameter(array $parameter): bool
+    {
+        $schema = $parameter['schema'] ?? null;
+        $type = is_array($schema) ? ($schema['type'] ?? null) : null;
+        $types = is_string($type) ? [$type] : (is_array($type) ? $type : []);
+
+        return $types !== [] && array_intersect($types, ['array', 'object']) === [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $parameter
+     * @return array{0: string, 1: bool}
+     */
+    private function effectiveSerialization(array $parameter): array
+    {
+        $in = $parameter['in'] ?? null;
+        $default = $in === 'path' || $in === 'header' ? 'simple' : 'form';
+        $style = is_string($parameter['style'] ?? null) ? $parameter['style'] : $default;
+        $explode = is_bool($parameter['explode'] ?? null) ? $parameter['explode'] : $style === 'form';
+
+        return [$style, $explode];
     }
 
     /**

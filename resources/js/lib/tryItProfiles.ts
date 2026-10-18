@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 import { t } from '@/lib/i18n'
 import type { TryItProfile } from '@/lib/tryIt'
-import { discardMissingProfile, setSelectedProfileId } from '@/lib/tryItSession'
+import { discardMissingProfile, selectedProfileId, switchProfile } from '@/lib/tryItSession'
 
 export interface StoredTryItProfile extends TryItProfile {
   server_variables?: Record<string, string>
@@ -74,10 +74,13 @@ export async function loadProfiles(target: ProfileEndpoint): Promise<void> {
       return
     }
 
+    // The list being replaced still knows a selected profile this one lost, so its
+    // values can be released rather than left behind for the next credential.
+    const known = profiles.value
     profiles.value = Array.isArray(payload.profiles)
       ? payload.profiles.map(withServerVariableMap).filter(isTryItProfile)
       : []
-    discardMissingProfile(profiles.value.map((profile) => profile.id))
+    discardMissingProfile(profiles.value.map((profile) => profile.id), known)
   } catch {
     if (generation === loadGeneration) {
       profileError.value = t('tryIt.profileLoadError')
@@ -89,10 +92,15 @@ export async function loadProfiles(target: ProfileEndpoint): Promise<void> {
   }
 }
 
-/** Returns the created profile, or null when the request was refused. */
+/**
+ * Returns the created profile, or null when the request was refused. A created profile
+ * is selected through `switchProfile`, so `variableDefaults` is what a variable the
+ * previous profile supplied falls back to — the caller's server defaults.
+ */
 export async function createProfile(
   target: ProfileEndpoint,
   input: ProfileCredentialInput,
+  variableDefaults: Readonly<Record<string, string>>,
 ): Promise<StoredTryItProfile | null> {
   if (input.credential === '') {
     profileError.value = t('tryIt.credentialRequired')
@@ -135,8 +143,9 @@ export async function createProfile(
       return null
     }
 
+    const previous = profiles.value.find((profile) => profile.id === selectedProfileId.value)
     profiles.value = [...profiles.value, created]
-    setSelectedProfileId(created.id)
+    switchProfile(created, previous, variableDefaults)
 
     return created
   } catch {
@@ -146,7 +155,12 @@ export async function createProfile(
   }
 }
 
-export async function deleteProfile(target: ProfileEndpoint, id: string): Promise<void> {
+/** `variableDefaults`: same as for `createProfile`, used when the selected profile goes. */
+export async function deleteProfile(
+  target: ProfileEndpoint,
+  id: string,
+  variableDefaults: Readonly<Record<string, string>>,
+): Promise<void> {
   profileError.value = ''
 
   try {
@@ -162,10 +176,13 @@ export async function deleteProfile(target: ProfileEndpoint, id: string): Promis
       return
     }
 
+    const known = profiles.value
     profiles.value = profiles.value.filter((profile) => profile.id !== id)
     // Only the deleted profile loses the selection: clearing it unconditionally would
     // send the next request unauthenticated against the still-selected profile's target.
-    discardMissingProfile(profiles.value.map((profile) => profile.id))
+    // Its base URL and variables are released with it, so the next profile chosen does
+    // not inherit them.
+    discardMissingProfile(profiles.value.map((profile) => profile.id), known, variableDefaults)
   } catch {
     profileError.value = t('tryIt.profileDeleteError')
   }

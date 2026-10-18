@@ -68,6 +68,51 @@ it('classifies a parameter becoming required and a new optional parameter', func
         ->and($result->hasBreaking())->toBeTrue();
 });
 
+it('flags a query parameter explode change as breaking serialization drift', function (): void {
+    $document = static fn (bool $explode): array => differTestOperationDocument([
+        'parameters' => [
+            ['name' => 'ids', 'in' => 'query', 'explode' => $explode, 'schema' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        ],
+        'responses' => ['200' => ['description' => 'OK']],
+    ]);
+
+    $result = (new SpecDiffer)->diff($document(true), $document(false));
+    $changes = $result->toArray()['changes'];
+
+    expect(differTestChangeKinds($changes))
+        ->toBe([['type' => 'parameter_serialization_changed', 'severity' => 'breaking']])
+        ->and($changes[0]['path'])->toEndWith('.explode')
+        ->and($result->hasBreaking())->toBeTrue();
+});
+
+it('treats an omitted style and the same default written explicitly as unchanged', function (): void {
+    $document = static fn (array $extra): array => differTestOperationDocument([
+        'parameters' => [
+            ['name' => 'q', 'in' => 'query', 'schema' => ['type' => 'string']] + $extra,
+        ],
+        'responses' => ['200' => ['description' => 'OK']],
+    ]);
+
+    $result = (new SpecDiffer)->diff($document([]), $document(['style' => 'form', 'explode' => true]));
+
+    expect($result->toArray()['changes'])->toBe([])
+        ->and($result->hasBreaking())->toBeFalse();
+});
+
+it('ignores an explode change on a scalar parameter, which serializes the same either way', function (): void {
+    $document = static fn (array $extra): array => differTestOperationDocument([
+        'parameters' => [
+            ['name' => 'q', 'in' => 'query', 'schema' => ['type' => ['string', 'null']]] + $extra,
+        ],
+        'responses' => ['200' => ['description' => 'OK']],
+    ]);
+
+    $result = (new SpecDiffer)->diff($document([]), $document(['explode' => false]));
+
+    expect($result->toArray()['changes'])->toBe([])
+        ->and($result->hasBreaking())->toBeFalse();
+});
+
 it('classifies a widened response type as breaking and a narrowed subset as additive', function (): void {
     // A response schema is the producer's guarantee to every existing consumer. Adding a
     // possible type (`string` -> `string|null`) introduces a value nobody was prepared

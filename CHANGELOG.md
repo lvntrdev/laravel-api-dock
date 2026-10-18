@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.9] - 2026-10-18
+
+### Security
+
+- **An integer tenant namespace no longer collapses tenants onto one credential key.** With `try_it.profile_persistence.enabled` on, a `key_namespace` resolver that returned an int (`101`) was silently ignored, so two tenants sharing a guard and a user id read and used each other's stored profile. An int is now accepted as a namespace; a resolver that is configured but returns anything unusable (null, an empty string, a non-callable value) makes that request fall back to session storage instead of the shared key. Profiles stored under the old shared key are no longer visible and expire with their TTL.
+- **Switching profiles from Settings no longer sends the new credential to the previous profile's server.** The rule that releases the previous profile's base URL and server variables lived only in the try-it panel, which is unmounted while Settings is open. Every switch — the try-it picker, the Settings list, creating or deleting a profile, a refreshed list losing the selected one — now goes through one shared function.
+- **A deleted credential profile can no longer be resurrected by an in-flight request.** Laravel runs requests of one session in parallel, so a try-it request that started before a delete wrote the old session back when it finished. API Dock routes now use Laravel's session blocking, with a lock longer than the outbound timeout, when the session cache store supports atomic locks. Host-application routes sharing the session are not serialized by this.
+
+### Fixed
+
+- **Try-it sends the request body exactly as written.** The panel parsed the editor JSON and the proxy re-encoded it, turning `{}` into `[]`, `{"metadata":{}}` into `{"metadata":[]}` and a bare `"hello"` into an unquoted string. The validated editor text is now forwarded verbatim.
+- **`api-dock:diff` and `sync --check` report parameter serialization changes.** A changed effective `style`, or a changed `explode` on an array or object parameter, is reported as a breaking `parameter_serialization_changed`; an omitted default and the same value written explicitly are not a change.
+- **Try-it honours a server declared on the path item.** Server resolution now follows OpenAPI's operation → path → document order instead of skipping the path level.
+- **The MCP tool copied from the AI panel is self-contained and keeps every parameter.** Nested `$ref`s (for example `items.$ref`) are inlined with cycle protection, matching the PHP exporter, and colliding argument names get `_2`, `_3` suffixes instead of overwriting an existing one.
+
 ## [0.0.8] - 2026-10-01
 
 ### Security

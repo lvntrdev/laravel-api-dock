@@ -54,7 +54,14 @@ export function operationServers(
   document: OpenApiDocument,
   entry: OperationEntry,
 ): ServerObject[] {
-  return entry.operation.servers?.length ? entry.operation.servers : (document.servers ?? [])
+  // OpenAPI resolves the target operation first, then its path item, then the document.
+  if (entry.operation.servers?.length) {
+    return entry.operation.servers
+  }
+
+  const pathServers = document.paths?.[entry.path]?.servers
+
+  return pathServers?.length ? pathServers : (document.servers ?? [])
 }
 
 /**

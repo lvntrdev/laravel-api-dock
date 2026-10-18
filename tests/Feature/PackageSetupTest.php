@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 use Composer\Autoload\ClassLoader;
 use Illuminate\Auth\GenericUser;
+use Illuminate\Cache\ApcStore;
+use Illuminate\Cache\ApcWrapper;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Lvntr\ApiDock\ApiDockServiceProvider;
@@ -255,4 +259,66 @@ it('stamps the docs mount with a per-account identity that is not the user id', 
     expect($identityOf(null))->toBe('');
     expect($identityOf(1))->toMatch('/^[0-9a-f]{16}$/')
         ->not->toBe($identityOf(2));
+});
+
+/**
+ * Every route the package registered, keyed by name.
+ *
+ * @return array<string, Route>
+ */
+function apiDockRoutes(): array
+{
+    $routes = [];
+
+    foreach (app('router')->getRoutes()->getRoutes() as $route) {
+        $name = (string) $route->getName();
+
+        if (str_starts_with($name, 'api-dock.')) {
+            $routes[$name] = $route;
+        }
+    }
+
+    return $routes;
+}
+
+it('session-blocks every API Dock route for longer than an outbound try-it can run', function (): void {
+    // Session-mode profiles are written back with the whole session: without the
+    // lock, a try-it that started before a delete would restore the profile. The
+    // lock must outlive that try-it, or the delete slips in while it still runs.
+    $routes = apiDockRoutes();
+
+    expect(array_keys($routes))->toContain(
+        'api-dock.spec',
+        'api-dock.try-it',
+        'api-dock.try-it.profiles.index',
+        'api-dock.try-it.profiles.store',
+        'api-dock.try-it.profiles.destroy',
+        'api-dock.docs',
+    );
+
+    $outbound = (int) config('api-dock.try_it.timeout') + (int) config('api-dock.try_it.connect_timeout');
+
+    foreach ($routes as $name => $route) {
+        expect($route->locksFor())->toBeInt()->toBeGreaterThan($outbound, $name)
+            ->and($route->waitsFor())->toBeInt()->toBeGreaterThanOrEqual($route->locksFor(), $name);
+    }
+});
+
+it('leaves the routes unblocked, and working, when the session lock store cannot lock', function (): void {
+    // apc implements no lock(): a blocked route would make StartSession throw on
+    // every request, so the package must not opt in on such a store.
+    Cache::extend('no-locks', fn () => Cache::repository(new ApcStore(new ApcWrapper)));
+    config()->set('cache.stores.no-locks', ['driver' => 'no-locks']);
+    config()->set('session.block_store', 'no-locks');
+
+    require dirname(__DIR__, 2).'/routes/api-dock.php';
+
+    expect(apiDockRoutes())->not->toBeEmpty();
+
+    foreach (apiDockRoutes() as $name => $route) {
+        expect($route->locksFor())->toBeNull($name)
+            ->and($route->waitsFor())->toBeNull($name);
+    }
+
+    $this->getJson('/api-dock/spec')->assertOk();
 });

@@ -5,7 +5,12 @@ import SettingsPanel from '@/components/SettingsPanel.vue'
 import TryItPanel from '@/components/TryItPanel.vue'
 import { setLocale } from '@/lib/i18n'
 import { loadProfiles, profiles, resetProfiles } from '@/lib/tryItProfiles'
-import { resetTryItSession, selectedProfileId } from '@/lib/tryItSession'
+import {
+  plainBaseUrl,
+  resetTryItSession,
+  selectedProfileId,
+  serverVariables,
+} from '@/lib/tryItSession'
 import type { OpenApiDocument, OperationEntry } from '@/types/openapi'
 
 const apiDocument: OpenApiDocument = {
@@ -145,6 +150,91 @@ describe('SettingsPanel', () => {
     // unauthenticated against A's target.
     expect(selectedProfileId.value).toBe(kept.id)
     expect(profiles.value.map((profile) => profile.id)).toEqual([kept.id])
+    wrapper.unmount()
+  })
+
+  // The try-it panel is unmounted while settings is open, so the switch here has to
+  // release the previous target on its own — otherwise B's credential goes to A's host.
+  it('releases the previous profile target when switching profiles from settings', async () => {
+    const first = storedProfile({
+      id: 'profile-1',
+      base_url: 'https://staging.example.com/api',
+      server_variables: { tenant: 'globex' },
+    })
+    const second = storedProfile({ id: 'profile-2', label: 'Sandbox' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [first, second] })))
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="select-profile-profile-1"]').trigger('click')
+    expect(plainBaseUrl.value).toBe(first.base_url)
+    expect(serverVariables.value.tenant).toBe('globex')
+
+    await wrapper.get('[data-testid="select-profile-profile-2"]').trigger('click')
+
+    expect(selectedProfileId.value).toBe(second.id)
+    expect(plainBaseUrl.value).toBe('')
+    expect(serverVariables.value.tenant).toBe('acme')
+    expect(wrapper.get<HTMLInputElement>('[data-testid="resolved-base-url"]').element.value)
+      .toBe('https://acme.example.com/api')
+    wrapper.unmount()
+  })
+
+  it('keeps an address the reader typed over the previous profile target', async () => {
+    const first = storedProfile({ id: 'profile-1', base_url: 'https://staging.example.com/api' })
+    const second = storedProfile({ id: 'profile-2', label: 'Sandbox' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ profiles: [first, second] })))
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="select-profile-profile-1"]').trigger('click')
+    await wrapper.get('[data-testid="base-url-input"]').setValue('https://mine.example.com/api')
+    await wrapper.get('[data-testid="select-profile-profile-2"]').trigger('click')
+
+    expect(plainBaseUrl.value).toBe('https://mine.example.com/api')
+    wrapper.unmount()
+  })
+
+  it('releases the target of a selected profile when it is deleted', async () => {
+    const profile = storedProfile({ id: 'profile-1', base_url: 'https://staging.example.com/api' })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [profile] }))
+      .mockResolvedValueOnce(jsonResponse({ deleted: true })))
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="select-profile-profile-1"]').trigger('click')
+    expect(plainBaseUrl.value).toBe(profile.base_url)
+
+    await wrapper.get('[data-testid="delete-profile-profile-1"]').trigger('click')
+    await flushPromises()
+
+    expect(selectedProfileId.value).toBe('')
+    expect(plainBaseUrl.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('applies a created profile and releases the previous target', async () => {
+    const first = storedProfile({ id: 'profile-1', base_url: 'https://staging.example.com/api' })
+    const created = storedProfile({
+      id: 'profile-2',
+      label: 'Sandbox',
+      server_variables: { tenant: 'globex' },
+    })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ profiles: [first] }))
+      .mockResolvedValueOnce(jsonResponse({ profile: created }, 201)))
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="select-profile-profile-1"]').trigger('click')
+    await wrapper.get('[data-testid="credential-input"]').setValue('raw-super-secret')
+    await wrapper.get('.profile-form').trigger('submit')
+    await flushPromises()
+
+    expect(selectedProfileId.value).toBe(created.id)
+    expect(plainBaseUrl.value).toBe('')
+    expect(serverVariables.value.tenant).toBe('globex')
     wrapper.unmount()
   })
 

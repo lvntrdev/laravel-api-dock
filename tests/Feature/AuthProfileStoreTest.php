@@ -1239,6 +1239,83 @@ it('does not let two tenants sharing one guard and one numeric id collide once k
     expect($store->all())->toBe([]);
 });
 
+it('keeps two tenants apart when key_namespace returns an integer tenant id', function (): void {
+    apiDockStorePersistenceOn();
+    $guard = config('auth.defaults.guard', 'web');
+
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', fn (): int => 101);
+    $this->actingAs(new GenericUser(['id' => 7]));
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['label' => 'Tenant 101', 'credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    // The namespace-less key is the one every tenant used to share when an int
+    // namespace was silently dropped — nothing may land there.
+    expect(AuthProfileStore::storageModeForCurrentRequest())->toBe(AuthProfileStore::MODE_PERSISTENT)
+        ->and(cache()->get(API_DOCK_STORE_CACHE_PREFIX.'101:'.$guard.':7'))->not->toBeNull()
+        ->and(apiDockStorePersistentEntry(7))->toBeNull();
+
+    // Same guard, same numeric id, a different integer tenant.
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', fn (): int => 202);
+    $this->flushSession();
+    $this->actingAs(new GenericUser(['id' => 7]));
+    $store = app(AuthProfileStore::class);
+
+    expect($store->all())->toBe([])
+        ->and($store->find($profile['id']))->toBeNull()
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBeNull();
+
+    // Tenant 202 clearing its own profiles must not reach tenant 101's.
+    $store->flush();
+
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', fn (): int => 101);
+
+    expect($store->revealCredentialForOutboundRequest($profile['id']))->toBe(API_DOCK_STORE_CREDENTIAL);
+});
+
+it('falls back to the session, never a shared cache key, when key_namespace yields no usable value', function (mixed $namespace): void {
+    apiDockStorePersistenceOn();
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', fn (): mixed => $namespace);
+
+    // Any cache read, write or delete here would mean the request reached the
+    // namespace-less key that every tenant with the same guard and id shares.
+    $cache = Mockery::mock(CacheRepository::class);
+    $cache->shouldReceive('getStore')->andReturn(new stdClass);
+    $cache->shouldNotReceive('get', 'put', 'forget');
+    app()->instance(CacheRepository::class, $cache);
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    expect(AuthProfileStore::storageModeForCurrentRequest())->toBe(AuthProfileStore::MODE_SESSION)
+        ->and(apiDockStoreRawEntry())->toContain($profile['id'])
+        ->and($store->revealCredentialForOutboundRequest($profile['id']))->toBe(API_DOCK_STORE_CREDENTIAL);
+
+    $store->flush();
+
+    expect(session()->has(API_DOCK_STORE_SESSION_KEY))->toBeFalse();
+})->with([
+    'null' => [null],
+    'empty string' => [''],
+    'false' => [false],
+    'float' => [101.0],
+    'array' => [['tenant-a']],
+    'object' => [new stdClass],
+]);
+
+it('falls back to the session when key_namespace is set to something that is not callable', function (): void {
+    apiDockStorePersistenceOn();
+    config()->set('api-dock.try_it.profile_persistence.key_namespace', 'not-a-callable-tenant-id');
+
+    $this->actingAs(new GenericUser(['id' => 7]));
+    $store = app(AuthProfileStore::class);
+    $profile = $store->put(['credential' => API_DOCK_STORE_CREDENTIAL]);
+
+    expect(AuthProfileStore::storageModeForCurrentRequest())->toBe(AuthProfileStore::MODE_SESSION)
+        ->and(apiDockStoreRawEntry())->toContain($profile['id'])
+        ->and(apiDockStorePersistentEntry(7))->toBeNull();
+});
+
 it('surfaces a failed persistent write instead of reporting the profile as saved', function (): void {
     apiDockStorePersistenceOn();
     $this->actingAs(new GenericUser(['id' => 7]));

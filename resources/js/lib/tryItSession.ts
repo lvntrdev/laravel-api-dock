@@ -28,6 +28,16 @@ interface TryItSessionState {
   plainBaseUrl: string
 }
 
+/**
+ * The part of a profile this module reads: where its credential goes. A stored profile
+ * satisfies it structurally; its masked hint and scheme are never read or persisted.
+ */
+export interface ProfileTarget {
+  id: string
+  base_url: string
+  server_variables?: Record<string, string>
+}
+
 /** The tab-scoped half: the form values the reader typed, per operation. */
 interface TryItDraftState {
   identity: string
@@ -56,7 +66,8 @@ const MAX_PARAMETER_LENGTH = 2_000
 
 // Security boundary: persist only the profile id, the selected server template, server
 // variables, and the plain base URL — all of them non-secret. Credentials, credential
-// header values, and credential_hint must never enter this module.
+// header values, and credential_hint must never enter this module's state; a profile is
+// read only through `ProfileTarget`.
 const initialState = storedState()
 
 const initialDrafts = storedDrafts()
@@ -108,6 +119,61 @@ export function bindIdentity(identity: string): void {
 
 export function setSelectedProfileId(profileId: string): void {
   selectedProfileId.value = profileId
+  persistPreferences()
+}
+
+/**
+ * The one way the selected profile changes — the try-it picker, the settings list, a
+ * created or a deleted profile — so the request target always moves with the credential,
+ * whichever panel is on screen.
+ *
+ * The values `previous` supplied are released first: leaving them in place would send
+ * the next credential to the previous profile's target without any visible sign. Only
+ * values still equal to what it supplied are released — a value the reader typed over is
+ * their own choice. A released variable returns to `variableDefaults` (the server the
+ * caller targets), or is removed when the caller does not know it. Then `next` applies its
+ * own values, its base URL even when the document declares servers: otherwise the
+ * environment the credential was saved for would be quietly ignored.
+ */
+export function switchProfile(
+  next: ProfileTarget | undefined,
+  previous: ProfileTarget | undefined,
+  variableDefaults: Readonly<Record<string, string>>,
+): void {
+  const variables = { ...serverVariables.value }
+  let baseUrl = plainBaseUrl.value
+
+  if (previous && previous.id !== next?.id) {
+    const nextVariables = next?.server_variables ?? {}
+
+    for (const [name, value] of Object.entries(previous.server_variables ?? {})) {
+      if (!Object.hasOwn(nextVariables, name) && variables[name] === value) {
+        if (Object.hasOwn(variableDefaults, name)) {
+          variables[name] = variableDefaults[name]
+        } else {
+          // Unknown to the caller (a list refresh knows no server): drop the value so every
+          // consumer falls back to its own server's default, the same one the proxy uses.
+          delete variables[name]
+        }
+      }
+    }
+
+    if (
+      previous.base_url !== ''
+      && (next?.base_url ?? '') === ''
+      && baseUrl === previous.base_url
+    ) {
+      baseUrl = ''
+    }
+  }
+
+  if (next && next.base_url !== '') {
+    baseUrl = next.base_url
+  }
+
+  selectedProfileId.value = next?.id ?? ''
+  serverVariables.value = { ...variables, ...(next?.server_variables ?? {}) }
+  plainBaseUrl.value = baseUrl
   persistPreferences()
 }
 
@@ -259,9 +325,21 @@ export function setOperationInputs(operationKey: string, inputs: TryItOperationI
   persistDrafts()
 }
 
-export function discardMissingProfile(profileIds: readonly string[]): void {
-  if (selectedProfileId.value !== '' && !profileIds.includes(selectedProfileId.value)) {
-    setSelectedProfileId('')
+/**
+ * Drops a selected profile the list no longer has. When the caller still knows it —
+ * deleted here, or gone from a refreshed list — its values are released like on any
+ * other switch. A persisted id the first load cannot resolve has nothing to release
+ * against, so only the id goes.
+ */
+export function discardMissingProfile(
+  profileIds: readonly string[],
+  known: readonly ProfileTarget[] = [],
+  variableDefaults: Readonly<Record<string, string>> = {},
+): void {
+  const id = selectedProfileId.value
+
+  if (id !== '' && !profileIds.includes(id)) {
+    switchProfile(undefined, known.find((profile) => profile.id === id), variableDefaults)
   }
 }
 
